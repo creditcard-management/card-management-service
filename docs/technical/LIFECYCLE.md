@@ -89,7 +89,7 @@ Todos delegan en `LifecycleTransitionExecutor`, que aplica siempre la misma secu
 
 Si falla cualquier paso con una excepción de dominio, registra una transición fallida (`successful = false`, `to_state` = destino buscado, `error_message` = motivo) y relanza la excepción. Si la tarjeta no existe (404) no se registra nada, porque `state_transitions.card_id` tiene FK a `cards`. Los servicios **no son transaccionales**: cada guardado en `state_transitions` se confirma por separado, así que el registro del fallo no se revierte. Si el guardado del fallo también falla, se loguea y se propaga el error original.
 
-`CardLifecycleService` solo expone consultas del historial.
+`CardLifecycleService` implementa `GetLifecycleHistoryUseCase` (historial completo, solo exitosas, solo fallidas); el controller depende del port y solo expone el historial completo.
 
 Junto con cada cambio, card-lifecycle envía `reason` y `performedBy` a `card-data`, que publica el evento de integración (`card.approved`, `card.blocked`, …) en la misma transacción. card-lifecycle no publica eventos de tarjeta. Ver [EVENTS.md §5.1](EVENTS.md).
 
@@ -502,6 +502,6 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-lifecycle-service
 Comportamientos actuales del código que conviene resolver:
 
 1. **Sin desbloqueo.** No hay endpoint ni implementación de `UnblockCardUseCase`, aunque está previsto en la state machine y en el dominio.
-2. **Ports sin implementar:** `UnblockCardUseCase` y `GetLifecycleHistoryUseCase` son interfaces sin implementación (el historial se consulta con `CardLifecycleService` directamente).
+2. **Port sin implementar:** `UnblockCardUseCase` es una interfaz sin implementación.
 3. **Consistencia entre servicios.** Emisión y activación hacen varias llamadas REST de escritura seguidas: si la segunda falla, `card-data` queda a medio actualizar y no hay compensación. Si falla el guardado de la transición después de las llamadas, el cambio en `card-data` ya está hecho y no queda historial. `RestTemplate` no tiene timeouts.
 4. **Cobertura de tests parcial.** Hay tests del consumidor Kafka (incluidos reintentos, DLQ y su reproceso contra un broker embebido), de la state machine con sus guards (`SpringStateMachineAdapterTest`), del cliente REST (`CardDataRestClientTest`), de la activación (`ActivateCardServiceTest`) y de rechazo, bloqueo y cancelación (`BlockAndCancelServicesTest`); faltan los de aprobación, emisión y del controller.

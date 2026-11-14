@@ -1,11 +1,11 @@
 package com.unisono.card.lifecycle.infrastructure.adapter.input.rest;
 
-import com.unisono.card.lifecycle.application.service.CardLifecycleService;
 import com.unisono.card.lifecycle.domain.model.StateTransition;
 import com.unisono.card.lifecycle.domain.port.input.ActivateCardUseCase;
 import com.unisono.card.lifecycle.domain.port.input.ApproveCardUseCase;
 import com.unisono.card.lifecycle.domain.port.input.BlockCardUseCase;
 import com.unisono.card.lifecycle.domain.port.input.CancelCardUseCase;
+import com.unisono.card.lifecycle.domain.port.input.GetLifecycleHistoryUseCase;
 import com.unisono.card.lifecycle.domain.port.input.IssueCardUseCase;
 import com.unisono.card.lifecycle.domain.port.input.RejectCardUseCase;
 import com.unisono.card.lifecycle.infrastructure.adapter.input.rest.dto.*;
@@ -32,7 +32,7 @@ import java.util.List;
 @Tag(name = "Card Lifecycle", description = "Gestión del ciclo de vida de tarjetas")
 public class CardLifecycleController {
 
-    private final CardLifecycleService lifecycleService;
+    private final GetLifecycleHistoryUseCase getLifecycleHistoryUseCase;
     private final LifecycleDtoMapper mapper;
     private final IssueCardUseCase issueCardUseCase;
     private final ApproveCardUseCase approveCardUseCase;
@@ -232,7 +232,7 @@ public class CardLifecycleController {
     ) {
         log.info("REST: Obteniendo historial de tarjeta: {}", cardId);
 
-        List<StateTransition> transitions = lifecycleService.getHistory(CardId.of(cardId));
+        List<StateTransition> transitions = getLifecycleHistoryUseCase.getHistory(CardId.of(cardId));
 
         List<LifecycleHistoryResponse> response = mapper.toHistoryResponseList(transitions);
 
