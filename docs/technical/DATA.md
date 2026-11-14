@@ -116,7 +116,7 @@ com.unisono.card.data
 | `updateCardData(pan, cvv, pin, exp)` | Carga datos de emisión sin cambiar el estado; setea `issuedAt`. Lo usa `issue()` |
 | `block(reason)` | Exige `CardStatus.canBlock()` (`ACTIVE` o `ISSUED`); → `BLOCKED`, guarda motivo y `blockedAt` |
 | `blockForFraud(reason)` | Igual que `block`; → `BLOCKED_FRAUD` |
-| `unblock()` | Exige estado bloqueado; → `ACTIVE`, limpia motivo y fecha y reinicia `pinFailedAttempts` |
+| `unblock()` | Exige `BLOCKED` (un `BLOCKED_FRAUD` no se desbloquea); → `ACTIVE`, limpia motivo y fecha y reinicia `pinFailedAttempts` |
 | `cancel(reason)` / `expire()` / `delete()` | → `CANCELLED` / `EXPIRED` (validando la transición) / soft delete |
 
 Una transición no permitida lanza `BusinessRuleException` (→ **422**).
@@ -168,7 +168,7 @@ Reglas aplicadas en `CardHolder.create(...)`:
 
 ### 3.5 `CardStatus` (de `card-shared`)
 
-`REQUESTED` → `APPROVED` / `REJECTED` → `ISSUED` → `ACTIVE` ⇄ `BLOCKED` / `BLOCKED_FRAUD` → `CANCELLED` / `EXPIRED`
+`REQUESTED` → `APPROVED` / `REJECTED` → `ISSUED` → `ACTIVE` ⇄ `BLOCKED` / `ACTIVE` → `BLOCKED_FRAUD` → `CANCELLED` / `EXPIRED`
 
 ```mermaid
 stateDiagram-v2
@@ -180,7 +180,6 @@ stateDiagram-v2
     ACTIVE --> BLOCKED: POST /block
     ACTIVE --> BLOCKED_FRAUD: POST /block-fraud
     BLOCKED --> ACTIVE: POST /unblock
-    BLOCKED_FRAUD --> ACTIVE: POST /unblock
     APPROVED --> CANCELLED: POST /cancel
     ISSUED --> CANCELLED: POST /cancel
     ACTIVE --> CANCELLED: POST /cancel
@@ -203,7 +202,8 @@ El detalle de las transiciones y quién las orquesta está en [LIFECYCLE.md](LIF
 | `APPROVED` | `ISSUED`, `CANCELLED` |
 | `ISSUED` | `ACTIVE`, `BLOCKED`, `BLOCKED_FRAUD`, `EXPIRED`, `CANCELLED` |
 | `ACTIVE` | `BLOCKED`, `BLOCKED_FRAUD`, `EXPIRED`, `CANCELLED` |
-| `BLOCKED`, `BLOCKED_FRAUD` | `ACTIVE`, `EXPIRED`, `CANCELLED` |
+| `BLOCKED` | `ACTIVE`, `EXPIRED`, `CANCELLED` |
+| `BLOCKED_FRAUD` | `EXPIRED`, `CANCELLED` (un bloqueo por fraude no se revierte) |
 | `REJECTED`, `CANCELLED`, `EXPIRED` | — (finales) |
 
 El bloqueo desde `ISSUED` sigue a `CardStatus.canBlock()`; la state machine de card-lifecycle solo lo prevé desde `ACTIVE`.
@@ -279,7 +279,7 @@ Reciben DTOs validados con Bean Validation (`UpdateCardStatusRequest`, `IssueCar
 |---|---|---|
 | `POST /{cardId}/block` | `{ "reason": "Tarjeta perdida", "performedBy": "…" }` (`reason` obligatorio) | → `BLOCKED`, **200** `CardResponse` |
 | `POST /{cardId}/block-fraud` | `{ "reason": "...", "performedBy": "…" }` (`reason` obligatorio) | → `BLOCKED_FRAUD`, **200** `CardResponse` |
-| `POST /{cardId}/unblock` | Opcional: `{ "reason": "…", "performedBy": "…" }` | → `ACTIVE`, **200** `CardResponse`. Si no estaba bloqueada → **422** |
+| `POST /{cardId}/unblock` | Opcional: `{ "reason": "…", "performedBy": "…" }` | Solo desde `BLOCKED`: → `ACTIVE`, **200** `CardResponse`. Si no estaba bloqueada o está `BLOCKED_FRAUD` → **422** |
 
 `performedBy` (opcional, máx. 100) es el autor que se publica en el evento; si falta, es `"system"`.
 

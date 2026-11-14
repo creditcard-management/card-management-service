@@ -234,7 +234,6 @@ stateDiagram-v2
     BLOCKED --> ACTIVE
     BLOCKED --> CANCELLED
     BLOCKED --> EXPIRED
-    BLOCKED_FRAUD --> ACTIVE
     BLOCKED_FRAUD --> CANCELLED
     BLOCKED_FRAUD --> EXPIRED
     REJECTED --> [*]
@@ -243,6 +242,8 @@ stateDiagram-v2
 ```
 
 Una tarjeta emitida vence al pasar su fecha aunque nunca se haya activado o esté bloqueada: `ISSUED`, `ACTIVE`, `BLOCKED` y `BLOCKED_FRAUD` pueden pasar a `EXPIRED`.
+
+Un bloqueo por fraude no se revierte: `BLOCKED_FRAUD` solo pasa a `CANCELLED` o `EXPIRED`.
 
 Invariantes cubiertos por `CardStatusTest`:
 

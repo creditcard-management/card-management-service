@@ -105,7 +105,7 @@ Junto con cada cambio, card-lifecycle envía `reason` y `performedBy` a `card-da
 - Envía el evento con los headers `cardId` (`CardId`) y `context` (`TransitionContext` con `reason`, `performedBy` y, en la emisión, PAN, CVV, PIN y vencimiento).
 - Si el resultado es `ACCEPTED` devuelve el estado destino. Si no, lanza `InvalidStateTransitionException` con el motivo que dejó el guard en la variable `guardRejection` del extended state o, si no hay transición para el evento, con `Transición inválida: no se puede ejecutar evento '<evento>' desde estado '<estado>'`.
 
-Las transiciones **no tienen actions**: los efectos los hacen los servicios de aplicación después de que la máquina acepta el evento. La state machine es más estricta que `card-data` en dos casos: solo permite bloquear desde `ACTIVE` (`card-data` también acepta `ISSUED`) y no permite desbloquear una tarjeta `BLOCKED_FRAUD` (`card-data` la desbloquea si se la llama directo).
+Las transiciones **no tienen actions**: los efectos los hacen los servicios de aplicación después de que la máquina acepta el evento. La state machine es más estricta que `card-data` en un caso: solo permite bloquear desde `ACTIVE` (`card-data` también acepta `ISSUED`). Desbloquear una tarjeta `BLOCKED_FRAUD` está prohibido en los dos lados: la state machine lo rechaza y `card-data` también (`Card.unblock()` y `CardStatus.canTransitionTo`).
 
 ---
 

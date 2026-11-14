@@ -19,7 +19,7 @@ class CardStatusTest {
             ISSUED, EnumSet.of(ACTIVE, BLOCKED, BLOCKED_FRAUD, EXPIRED, CANCELLED),
             ACTIVE, EnumSet.of(BLOCKED, BLOCKED_FRAUD, EXPIRED, CANCELLED),
             BLOCKED, EnumSet.of(ACTIVE, EXPIRED, CANCELLED),
-            BLOCKED_FRAUD, EnumSet.of(ACTIVE, EXPIRED, CANCELLED),
+            BLOCKED_FRAUD, EnumSet.of(EXPIRED, CANCELLED),
             REJECTED, EnumSet.noneOf(CardStatus.class),
             CANCELLED, EnumSet.noneOf(CardStatus.class),
             EXPIRED, EnumSet.noneOf(CardStatus.class)
