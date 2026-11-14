@@ -56,7 +56,8 @@ public class CreditLimitController {
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Límite asignado exitosamente"),
             @ApiResponse(responseCode = "400", description = "Datos inválidos"),
-            @ApiResponse(responseCode = "409", description = "La tarjeta ya tiene límites asignados")
+            @ApiResponse(responseCode = "404", description = "Tarjeta no encontrada"),
+            @ApiResponse(responseCode = "422", description = "Tarjeta no elegible o con límite ya asignado")
     })
     public ResponseEntity<CreditLimitResponse> assignCreditLimit(
             @Parameter(description = "ID de la tarjeta")
@@ -96,7 +97,7 @@ public class CreditLimitController {
             @ApiResponse(responseCode = "201", description = "Límite asignado exitosamente"),
             @ApiResponse(responseCode = "400", description = "Datos inválidos"),
             @ApiResponse(responseCode = "404", description = "Tarjeta no encontrada"),
-            @ApiResponse(responseCode = "409", description = "La tarjeta ya tiene límite asignado")
+            @ApiResponse(responseCode = "422", description = "Tarjeta no elegible o con límite ya asignado")
     })
     public ResponseEntity<CreditLimitResponse> assignCreditLimit(
             @Valid @RequestBody AssignCreditLimitRequest request
@@ -217,7 +218,8 @@ public class CreditLimitController {
             description = "Reduce el límite de compras")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Límite reducido exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Datos inválidos o límite menor al consumido"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "422", description = "El nuevo límite queda por debajo de lo consumido o del límite de adelantos"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> decreasePurchaseLimit(
@@ -245,7 +247,8 @@ public class CreditLimitController {
             description = "Modifica el límite de adelantos en efectivo")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Límite actualizado exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Límite excede el límite de compras"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "422", description = "El límite de adelantos excede el límite de compras"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> updateCashAdvanceLimit(
@@ -274,6 +277,7 @@ public class CreditLimitController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Límites actualizados exitosamente"),
             @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "422", description = "El límite diario supera al mensual"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> updateTemporalLimits(
@@ -305,7 +309,9 @@ public class CreditLimitController {
             description = "Registra una compra y consume el crédito correspondiente")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Crédito consumido exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Crédito insuficiente o límite excedido"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "409", description = "El operationId fue cancelado o anulado"),
+            @ApiResponse(responseCode = "422", description = "Crédito insuficiente, límite excedido o tarjeta no activa"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> consumeForPurchase(
@@ -334,7 +340,9 @@ public class CreditLimitController {
             description = "Registra un adelanto en efectivo y consume el crédito")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Crédito consumido exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Crédito insuficiente o límite excedido"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "409", description = "El operationId fue cancelado o anulado"),
+            @ApiResponse(responseCode = "422", description = "Crédito insuficiente, límite excedido o tarjeta no activa"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> consumeForCashAdvance(
@@ -364,6 +372,7 @@ public class CreditLimitController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Crédito liberado exitosamente"),
             @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "422", description = "El pago supera el crédito consumido"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> releaseCredit(
@@ -394,6 +403,8 @@ public class CreditLimitController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Crédito restaurado"),
             @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "409", description = "El operationId fue cancelado o anulado"),
+            @ApiResponse(responseCode = "422", description = "El operationId ya existe con otro tipo o es de otro límite"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> restoreCredit(

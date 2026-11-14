@@ -66,7 +66,7 @@ com.unisono.card.limits
     │                                JpaCreditLimitRepository, JpaCreditLimitHistoryRepository
     ├── adapter.output.card          CardAdapter + CardJpaEntity (lectura de cards)
     ├── adapter.output.cardvalidation CardValidationAdapter
-    └── config                       DataSource (Hikari), JPA, use cases, Swagger
+    └── config                       JPA (repositorios y entidades), Kafka, outbox, Swagger
 ```
 
 ### Mapa de casos de uso → servicios → endpoints
@@ -316,7 +316,7 @@ Mismo formato que `card-data`:
 | `BusinessRuleException` | 422 | Monedas distintas, tarjeta no elegible o no activa al consumir, límite duplicado, crédito insuficiente, límite diario o mensual excedido, reducción por debajo de lo consumido o del límite de adelantos, pago mayor a lo consumido, diario mayor al mensual |
 | Otras | 500 | — |
 
-> Las anotaciones OpenAPI de los endpoints de consumo dicen “400 crédito insuficiente”, pero el código devuelve **422**.
+> Las anotaciones OpenAPI de los endpoints documentan estos mismos códigos (400, 404, 409 y 422).
 
 ---
 
@@ -463,9 +463,9 @@ Transactional outbox de card-limits (V15), con la misma estructura que `outbox_e
 | `card.limits.outbox.retention-days` / `cleanup-cron` | `7` / `0 0 3 * * *` |
 | `management.endpoints.web.exposure.include` | `health,info,metrics` |
 
-El perfil `card-limits` (`application-card-limits.yml`, activado por docker-compose) agrega logging a `logs/card-limits.log`, Prometheus y SpringDoc. Declara además `credit-limits.defaults.*` (límite diario, mensual y % de adelantos), `credit-limits.validation.*` y `credit-limits.audit.*`, pero **ningún código las lee**: los valores efectivos están fijos en los VO.
+El perfil `card-limits` (`application-card-limits.yml`, activado por docker-compose) agrega logging a `logs/card-limits.log`, Prometheus y SpringDoc. Los defaults de negocio (límite diario 100.000, mensual 500.000, 30% de adelantos, mínimos y máximos) están fijos en los VO, no en la configuración.
 
-`CreditLimitDatabaseConfig` arma su propio `HikariDataSource` y agrega propiedades del driver (`cachePrepStmts`, `rewriteBatchedStatements`, `useLocalSessionState`, …) que son de MySQL Connector/J y no tienen efecto en PostgreSQL.
+El `DataSource` (HikariCP, pool `CreditLimitHikariCP`) lo arma Spring Boot a partir de `spring.datasource.*` y `spring.datasource.hikari.*`. `CreditLimitDatabaseConfig` solo declara los paquetes de repositorios y entidades JPA.
 
 ### 7.2 Docker
 
@@ -514,9 +514,9 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 
 ### 9.3 Técnicas
 
-11. **Configuración ignorada:** `credit-limits.*` del perfil y las propiedades MySQL del DataSource.
-12. **Archivos vacíos:** `domain/event/*` (3), `domain/exception/*` (3), `application/config/CreditLimitUseCaseConfig` y `infrastructure/config/CreditLimitJpaConfig` tienen 0 bytes.
-13. **DTO ajeno:** `infrastructure/adapter/input/rest/dto/LifecycleHistoryResponse.java` es una copia del DTO de `card-lifecycle` que no se usa.
+11. ~~**Configuración ignorada.**~~ Resuelto: se borraron `credit-limits.*` del perfil y el `DataSource` propio con propiedades de MySQL.
+12. ~~**Archivos vacíos.**~~ Resuelto: se borraron.
+13. ~~**DTO ajeno.**~~ Resuelto: se borró `LifecycleHistoryResponse`.
 14. **Dos endpoints de asignación** (`POST /` y `POST /cards/{cardId}`) con reglas distintas para el `cardId`.
-15. **`CreditLimitManagementService` se declara dos veces:** con `@Service` y como `@Bean` en `CreditLimitUseCaseConfig`. Lo mismo pasa con `CreditValidationService`.
+15. ~~**Servicios declarados dos veces.**~~ Resuelto: se borró `CreditLimitUseCaseConfig`; los servicios son `@Service`.
 16. **Tests incompletos:** `CreditLimitRestoreTest` (dominio de `restoreConsumption` y `revertOperation`), `CreditLimitControllerTest` y `CreditOperationIdempotencyTest` (idempotencia, cancelación y anulación, con repositorios en memoria, y los eventos `consumed`/`released`), `CreditLimitChangeEventsTest` (`assigned`/`updated`), `CreditLimitOutboxRelayTest` y `CreditLimitOutboxPersistenceTest` (outbox contra PostgreSQL con Testcontainers). Faltan tests de persistencia del límite y del lock.
