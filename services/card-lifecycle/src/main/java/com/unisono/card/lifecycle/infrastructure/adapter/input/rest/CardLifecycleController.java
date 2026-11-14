@@ -238,18 +238,4 @@ public class CardLifecycleController {
 
         return ResponseEntity.ok(response);
     }
-
-    // =============================================
-    // HELPERS PRIVADOS
-    // =============================================
-
-    /**
-     * Encripta el PIN (PLACEHOLDER)
-     * TODO: Implementar encriptación real con BCrypt o similar
-     */
-    private String hashPin(String pin) {
-        // PLACEHOLDER: En producción usar BCrypt o Argon2
-        log.warn("ADVERTENCIA: Usando hash placeholder para PIN. Implementar hash real en producción.");
-        return "HASHED_" + pin;
-    }
 }

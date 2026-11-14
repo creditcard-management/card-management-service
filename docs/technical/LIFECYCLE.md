@@ -53,10 +53,9 @@ com.unisono.card.lifecycle
 │   │                LifecycleStateMachinePort
 │   └── exception    InvalidStateTransitionException, CardDataIntegrationException
 ├── application
-│   ├── service      ApproveCardService, RejectCardService, IssueCardService,
-│   │                ActivateCardService, BlockCardService, CancelCardService,
-│   │                LifecycleTransitionExecutor, CardLifecycleService (consultas)
-│   └── dto.response LifecycleHistoryResponse, StateTransitionResponse
+│   └── service      ApproveCardService, RejectCardService, IssueCardService,
+│                    ActivateCardService, BlockCardService, CancelCardService,
+│                    LifecycleTransitionExecutor, CardLifecycleService (consultas)
 └── infrastructure
     ├── adapter.input.rest     CardLifecycleController, GlobalExceptionHandler, DTOs,
     │                          LifecycleDtoMapper
@@ -477,7 +476,7 @@ Consultas (`JpaStateTransitionRepository`): por tarjeta (desc), solo exitosas, s
 | `card-lifecycle.kafka.history.auto-offset-reset` | `latest` (primer arranque del grupo del historial: no reprocesa eventos viejos, ver §5.5) |
 | `card-lifecycle.kafka.dlq-redrive.*` | Reproceso de la DLQ: `enabled` `true`, `max-attempts` `5`, `initial-delay-ms` `60000`, `multiplier` `2`, `send-timeout-ms` `10000`, `retry-interval-ms` `5000`. Ver [EVENTS.md §5.3](EVENTS.md) |
 
-El perfil `card-lifecycle` (`application-card-lifecycle.yml`, activado por docker-compose) agrega logging a `logs/card-lifecycle.log`, Prometheus, SpringDoc y endpoints de actuator. Las propiedades `card-lifecycle.transitions.*` (timeout, reintentos) y `card-lifecycle.audit.*` (retención) están declaradas pero **ningún código las lee**.
+El perfil `card-lifecycle` (`application-card-lifecycle.yml`, activado por docker-compose) agrega logging a `logs/card-lifecycle.log`, Prometheus, SpringDoc y endpoints de actuator.
 
 ### 8.2 Docker
 
@@ -505,5 +504,4 @@ Comportamientos actuales del código que conviene resolver:
 1. **Sin desbloqueo.** No hay endpoint ni implementación de `UnblockCardUseCase`, aunque está previsto en la state machine y en el dominio.
 2. **Ports sin implementar:** `UnblockCardUseCase` y `GetLifecycleHistoryUseCase` son interfaces sin implementación (el historial se consulta con `CardLifecycleService` directamente).
 3. **Consistencia entre servicios.** Emisión y activación hacen varias llamadas REST de escritura seguidas: si la segunda falla, `card-data` queda a medio actualizar y no hay compensación. Si falla el guardado de la transición después de las llamadas, el cambio en `card-data` ya está hecho y no queda historial. `RestTemplate` no tiene timeouts.
-4. **Código muerto:** `hashPin()` en el controller, `LifecycleDtoMapper.toIssueCardCommand` y su record interno, `application/dto/response/LifecycleHistoryResponse` (duplicado del DTO REST), `StateMachineActionConfig` (vacío) y las propiedades `card-lifecycle.*` del perfil.
-5. **Cobertura de tests parcial.** Hay tests del consumidor Kafka (incluidos reintentos, DLQ y su reproceso contra un broker embebido), de la state machine con sus guards (`SpringStateMachineAdapterTest`), del cliente REST (`CardDataRestClientTest`), de la activación (`ActivateCardServiceTest`) y de rechazo, bloqueo y cancelación (`BlockAndCancelServicesTest`); faltan los de aprobación, emisión y del controller.
+4. **Cobertura de tests parcial.** Hay tests del consumidor Kafka (incluidos reintentos, DLQ y su reproceso contra un broker embebido), de la state machine con sus guards (`SpringStateMachineAdapterTest`), del cliente REST (`CardDataRestClientTest`), de la activación (`ActivateCardServiceTest`) y de rechazo, bloqueo y cancelación (`BlockAndCancelServicesTest`); faltan los de aprobación, emisión y del controller.
