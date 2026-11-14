@@ -67,15 +67,22 @@ public interface RecalculateAvailableCreditUseCase {
             Money amount,
             java.time.LocalDate originalTransactionDate,
             String description,
-            String operationId
+            String operationId,
+            boolean cashAdvance
     ) {
         public RestoreCreditCommand {
             operationId = CreditOperation.operationIdOrGenerated(operationId);
         }
 
+        /** @param cashAdvance la transacción original fue un adelanto: también devuelve lo usado en adelantos */
+        public RestoreCreditCommand(String creditLimitId, Money amount, java.time.LocalDate originalTransactionDate,
+                                    String description, String operationId) {
+            this(creditLimitId, amount, originalTransactionDate, description, operationId, false);
+        }
+
         public RestoreCreditCommand(String creditLimitId, Money amount, java.time.LocalDate originalTransactionDate,
                                     String description) {
-            this(creditLimitId, amount, originalTransactionDate, description, null);
+            this(creditLimitId, amount, originalTransactionDate, description, null, false);
         }
     }
 

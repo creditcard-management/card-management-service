@@ -247,7 +247,8 @@ public class CreditLimitManagementService implements
 
         return applyOperation(command.creditLimitId(), command.operationId(), CreditOperation.Type.RESTORE,
                 command.description(), Movement.REFUND, creditLimit -> {
-                    Money notRestored = creditLimit.restoreConsumption(command.amount(), command.originalTransactionDate());
+                    Money notRestored = creditLimit.restoreConsumption(command.amount(), command.originalTransactionDate(),
+                            command.cashAdvance());
                     if (!notRestored.isZero()) {
                         log.warn("Credit limit {}: {} not restored because it exceeds the consumed credit (already paid)",
                                 command.creditLimitId(), notRestored);

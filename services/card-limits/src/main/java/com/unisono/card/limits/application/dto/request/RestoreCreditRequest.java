@@ -48,4 +48,8 @@ public class RestoreCreditRequest {
             + "POST /{creditLimitId}/operations/{operationId}/cancel",
             example = "6f1c2d3e-8a9b-4c5d-9e0f-1a2b3c4d5e6f")
     private String operationId;
+
+    @Schema(description = "La transacción original fue un adelanto en efectivo: también devuelve lo usado en "
+            + "adelantos. Opcional, por defecto false", example = "false")
+    private Boolean cashAdvance;
 }

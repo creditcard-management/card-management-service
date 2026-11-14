@@ -402,7 +402,8 @@ class PaymentDomainServiceTest {
             assertThat(refund.getOriginalTransactionId()).isEqualTo(original.getTransactionId());
             assertThat(refund.getDomainEvents()).anyMatch(RefundProcessed.class::isInstance);
             verify(creditLimitPort).restoreCredit(any(), eq(CARD_ID), eq(AMOUNT),
-                    eq(original.getTransactionDate().toLocalDate()), contains(original.getTransactionId().toString()));
+                    eq(original.getTransactionDate().toLocalDate()), contains(original.getTransactionId().toString()),
+                    eq(false));
         }
 
         @Test
@@ -486,7 +487,19 @@ class PaymentDomainServiceTest {
 
         assertThat(purchase.getStatus()).isEqualTo(TransactionStatus.REVERSED);
         verify(creditLimitPort).restoreCredit(any(), eq(CARD_ID), eq(AMOUNT),
-                eq(purchase.getTransactionDate().toLocalDate()), contains("Cliente desistió"));
+                eq(purchase.getTransactionDate().toLocalDate()), contains("Cliente desistió"), eq(false));
+    }
+
+    @Test
+    void shouldFlagTheRestoreAsCashAdvanceWhenReversingACashAdvance() {
+        Transaction advance = approvedCashAdvance();
+
+        service.reverseTransaction(advance, "Error del cajero");
+
+        assertThat(advance.getStatus()).isEqualTo(TransactionStatus.REVERSED);
+        // card-limits también devuelve lo usado en adelantos (son acumulativos contra su tope)
+        verify(creditLimitPort).restoreCredit(any(), eq(CARD_ID), eq(AMOUNT),
+                eq(advance.getTransactionDate().toLocalDate()), contains("Error del cajero"), eq(true));
     }
 
     @Test
@@ -497,7 +510,7 @@ class PaymentDomainServiceTest {
 
         assertThat(preAuthorized.getStatus()).isEqualTo(TransactionStatus.REVERSED);
         verify(authorizationPort).voidAuthorization(preAuthorized);
-        verify(creditLimitPort).restoreCredit(any(), eq(CARD_ID), eq(AMOUNT), any(), anyString());
+        verify(creditLimitPort).restoreCredit(any(), eq(CARD_ID), eq(AMOUNT), any(), anyString(), eq(false));
     }
 
     @Test
@@ -577,6 +590,14 @@ class PaymentDomainServiceTest {
 
     private static Transaction approvedPurchase() {
         Transaction transaction = authorizedPurchase();
+        transaction.approve();
+        return transaction;
+    }
+
+    private static Transaction approvedCashAdvance() {
+        Transaction transaction = Transaction.createCashAdvance(CARD_ID, cardData(), merchant(),
+                TransactionAmount.of(AMOUNT), PaymentMethod.CHIP);
+        transaction.authorize(AuthorizationCode.approved("AUTH02"), 10);
         transaction.approve();
         return transaction;
     }

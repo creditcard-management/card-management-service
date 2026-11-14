@@ -101,6 +101,49 @@ class CreditOperationIdempotencyTest {
     }
 
     // ========================================
+    // Adelantos acumulativos
+    // ========================================
+
+    @Test
+    void cancellingACashAdvanceGivesBackItsCashAdvanceUsage() {
+        service.consumeForCashAdvance(consume("adv-1", 20_000));
+        assertThat(creditLimit.getCashAdvanceConsumed().getAmount()).isEqualTo(Money.ofARS(20_000));
+        assertThat(operations.findById("adv-1").orElseThrow().getCashAdvanceDelta()).isEqualTo(Money.ofARS(20_000));
+
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "adv-1"));
+
+        assertThat(creditLimit.getConsumedCredit().getAmount().isZero()).isTrue();
+        assertThat(creditLimit.getCashAdvanceConsumed().getAmount().isZero()).isTrue();
+    }
+
+    @Test
+    void restoreFlaggedAsCashAdvanceGivesBackTheUsageAndCancellingItTakesItAgain() {
+        service.consumeForCashAdvance(consume("adv-1", 20_000));
+
+        service.restoreCredit(new RestoreCreditCommand(creditLimit.getId(), Money.ofARS(20_000), LocalDate.now(),
+                "reverso del adelanto", "rev-1", true));
+        assertThat(creditLimit.getCashAdvanceConsumed().getAmount().isZero()).isTrue();
+        assertThat(operations.findById("rev-1").orElseThrow().getCashAdvanceDelta()).isEqualTo(Money.ofARS(-20_000));
+
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "rev-1"));
+        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(20_000));
+        assertThat(creditLimit.getCashAdvanceConsumed().getAmount()).isEqualTo(Money.ofARS(20_000));
+    }
+
+    @Test
+    void cancellingAPaymentGivesBackTheCashAdvancesItHadPaid() {
+        service.consumeForCashAdvance(consume("adv-1", 20_000));
+        service.consumeForPurchase(consume("op-1", 30_000));
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(25_000), "pago", "pay-1"));
+        assertThat(creditLimit.getCashAdvanceConsumed().getAmount().isZero()).isTrue();
+
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "pay-1"));
+
+        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(50_000));
+        assertThat(creditLimit.getCashAdvanceConsumed().getAmount()).isEqualTo(Money.ofARS(20_000));
+    }
+
+    // ========================================
     // Liberaciones (pago del resumen)
     // ========================================
 

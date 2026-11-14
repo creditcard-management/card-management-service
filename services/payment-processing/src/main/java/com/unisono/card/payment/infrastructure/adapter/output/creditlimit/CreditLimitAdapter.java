@@ -108,7 +108,7 @@ public class CreditLimitAdapter {
     }
 
     public void restoreCredit(String operationId, CardId cardId, Money amount, LocalDate originalTransactionDate,
-                              String description) {
+                              String description, boolean cashAdvance) {
         log.debug("Restoring credit for card: {}, amount: {}, original date: {}, operation: {}",
                 cardId, amount, originalTransactionDate, operationId);
 
@@ -117,7 +117,7 @@ public class CreditLimitAdapter {
         try {
             restTemplate.postForObject(url,
                     new RestoreCreditRequest(amount.getAmount(), amount.getCurrencyCode(),
-                            originalTransactionDate.toString(), truncate(description), operationId),
+                            originalTransactionDate.toString(), truncate(description), operationId, cashAdvance),
                     Void.class);
             log.info("Restored credit for card {}: {}", cardId, amount);
 
@@ -221,6 +221,8 @@ public class CreditLimitAdapter {
         private String originalTransactionDate; // ISO yyyy-MM-dd
         private String description;
         private String operationId;
+        /** La transacción original fue un adelanto: card-limits también devuelve lo usado en adelantos */
+        private boolean cashAdvance;
     }
 
     @lombok.Data

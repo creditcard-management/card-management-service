@@ -92,6 +92,7 @@ com.unisono.card.limits
 | `purchaseLimit` | `PurchaseLimit` | Límite total de compras |
 | `cashAdvanceLimit` | `CashAdvanceLimit` | Tope de adelantos en efectivo |
 | `consumedCredit` | `ConsumedCredit` | Crédito usado |
+| `cashAdvanceConsumed` | `ConsumedCredit` | Parte de lo consumido usada en adelantos (acumulativa contra el tope de adelantos) |
 | `availableCredit` | `AvailableCredit` | `purchaseLimit − consumedCredit` (se recalcula tras cada cambio) |
 | `dailyLimit` | `DailyLimit` | Tope diario con consumo del día |
 | `monthlyLimit` | `MonthlyLimit` | Tope mensual con consumo del mes |
@@ -101,6 +102,8 @@ com.unisono.card.limits
 **Invariantes declaradas:**
 
 - El límite de adelantos no puede superar el límite de compras.
+- Lo usado en adelantos es parte de lo consumido: 0 ≤ `cashAdvanceConsumed` ≤ `consumedCredit`.
+- Disponible para adelantos = tope de adelantos − usado en adelantos (cero si el tope quedó por debajo).
 - El crédito consumido no puede superar el límite total.
 - Crédito disponible = límite de compras − crédito consumido.
 - Los límites diario y mensual se reinician solos al cambiar el día o el mes.
@@ -125,12 +128,12 @@ Todos operan sobre `Money` (`card-shared`): montos con escala 2 y `HALF_UP`. **S
 | `assign(cardId, monto, %adelantos, por)` | Datos obligatorios, % entre 0 y 1, rangos de los VO | Nuevo límite; consumido 0; diario/mensual por defecto | `ASSIGNED` (PURCHASE) |
 | `increasePurchaseLimit(+monto)` | Nuevo total ≤ 10M | Sube el límite y recalcula el disponible | `INCREASED` (PURCHASE) |
 | `decreasePurchaseLimit(−monto)` | Nuevo total ≥ 1.000 y ≥ consumido | Baja el límite y recalcula el disponible | `DECREASED` (PURCHASE) |
-| `updateCashAdvanceLimit(nuevo)` | ≤ límite de compras, rango del VO | Reemplaza el tope de adelantos | `INCREASED`/`DECREASED` (CASH_ADVANCE) |
+| `updateCashAdvanceLimit(nuevo)` | ≤ límite de compras, rango del VO. Puede quedar por debajo de lo usado en adelantos | Reemplaza el tope de adelantos; si queda por debajo de lo usado, los adelantos nuevos se rechazan hasta que un pago lo baje | `INCREASED`/`DECREASED` (CASH_ADVANCE) |
 | `updateDailyLimit(nuevo)` / `updateMonthlyLimit(nuevo)` | No nulo | Reemplaza el tope; conserva el consumo del período en curso | `INCREASED`/`DECREASED` (DAILY/MONTHLY) |
 | `consumeForPurchase(monto)` | > 0, ≤ límite de compras, ≤ disponible, ≤ disponible diario y mensual | Suma al consumido, al diario y al mensual | — |
-| `consumeForCashAdvance(monto)` | > 0, ≤ tope de adelantos, ≤ disponible, ≤ diario y mensual | Igual que la compra | — |
-| `releaseCredit(monto)` | > 0 | Pago del resumen: resta del consumido y recalcula el disponible (no toca diario ni mensual) | — |
-| `restoreConsumption(monto, fechaOriginal)` | > 0, fecha obligatoria | Reverso o devolución: resta del consumido (como mucho hasta cero) y recalcula el disponible. Si `fechaOriginal` es del día en curso, resta del acumulado diario; si es del mes en curso, del mensual. Devuelve el excedente que no se pudo restaurar | — |
+| `consumeForCashAdvance(monto)` | > 0, adelantos habilitados, ≤ disponible para adelantos (acumulativo), ≤ disponible, ≤ diario y mensual | Igual que la compra y además suma a lo usado en adelantos | — |
+| `releaseCredit(monto)` | > 0, ≤ consumido | Pago del resumen: resta del consumido y recalcula el disponible (no toca diario ni mensual). **Cancela primero lo usado en adelantos** y el resto va a compras | — |
+| `restoreConsumption(monto, fechaOriginal, adelanto)` | > 0, fecha obligatoria | Reverso o devolución: resta del consumido (como mucho hasta cero) y recalcula el disponible. Si `fechaOriginal` es del día en curso, resta del acumulado diario; si es del mes en curso, del mensual. Si la original fue un adelanto, también resta de lo usado en adelantos (como mucho hasta cero). Devuelve el excedente que no se pudo restaurar | — |
 | `canPurchase(monto)` / `canCashAdvance(monto)` | Las mismas reglas, sin lanzar excepciones | `true` / `false` | — |
 
 ### 3.4 `CreditLimitHistory`
@@ -212,6 +215,8 @@ Igual que el anterior. El `cardId` del body es obligatorio y debe coincidir con 
   "cardId": "550e8400-e29b-41d4-a716-446655440000",
   "purchaseLimit": 150000.00,
   "cashAdvanceLimit": 45000.00,
+  "cashAdvanceConsumed": 2000.00,
+  "cashAdvanceAvailable": 43000.00,
   "availableCredit": 145000.00,
   "consumedCredit": 5000.00,
   "dailyLimit": 100000.00,
@@ -220,11 +225,14 @@ Igual que el anterior. El `cardId` del body es obligatorio y debe coincidir con 
   "monthlyAvailable": 495000.00,
   "currency": "ARS",
   "createdAt": "2026-11-02T10:15:30",
-  "updatedAt": "2026-11-02T11:00:00"
+  "updatedAt": "2026-11-02T11:00:00",
+  "operationId": "6f1c…"
 }
 ```
 
-**`CreditInfoResponse`**: `purchaseLimit`, `cashAdvanceLimit`, `availableCredit`, `consumedCredit`, `utilizationPercentage` (consumido / límite × 100), `dailyAvailable`, `monthlyAvailable`, `currency`, `isExhausted`.
+`operationId` solo aparece en las respuestas de consumos, restauraciones y liberaciones.
+
+**`CreditInfoResponse`**: `purchaseLimit`, `cashAdvanceLimit`, `cashAdvanceConsumed`, `cashAdvanceAvailable`, `availableCredit`, `consumedCredit`, `utilizationPercentage` (consumido / límite × 100), `dailyAvailable`, `monthlyAvailable`, `currency`, `isExhausted`.
 
 **`CreditLimitHistoryResponse`**: `id`, `limitType`, `action`, `previousValue`, `newValue`, `difference`, `currency`, `reason`, `changedBy`, `changedAt`, `description` (por ejemplo `"Límite de Compras: INCREASED cambió de ARS 150000.00 a ARS 200000.00 (diferencia: ARS 50000.00) - Razón: …"`).
 
@@ -237,7 +245,7 @@ Igual que el anterior. El `cardId` del body es obligatorio y debe coincidir con 
 ```
 
 - En `increase` y `decrease`, `amount` es la **diferencia** a sumar o restar.
-- En `update-cash-advance-limit`, `amount` es el **nuevo valor absoluto** del tope. `0` deshabilita los adelantos; entre 0 y 500 es inválido (400).
+- En `update-cash-advance-limit`, `amount` es el **nuevo valor absoluto** del tope. `0` deshabilita los adelantos; entre 0 y 500 es inválido (400). Se puede bajar por debajo de lo ya usado en adelantos: los adelantos nuevos se rechazan hasta que un pago lo baje.
 - En `increase` y `decrease`, `amount` debe ser mayor a cero (400).
 - `decrease` responde **422** si el nuevo límite de compras queda por debajo de lo consumido o del límite de adelantos (hay que bajar primero el de adelantos).
 
@@ -256,7 +264,7 @@ Los dos montos son opcionales (> 0 si se envían). Se valida la combinación fin
 | `POST /{creditLimitId}/consume-purchase` | `{ "amount": 5000.00, "currency": "ARS", "description": "Compra en Mercado Libre", "operationId": "6f1c…" }` | Consume crédito por una compra |
 | `POST /{creditLimitId}/consume-cash-advance` | ídem | Consume crédito por un adelanto |
 | `POST /{creditLimitId}/release-credit` | `{ "paymentAmount": 10000.00, "currency": "ARS", "description": "Pago de resumen", "operationId": "pago-…" }` | Libera crédito (pago del resumen). **422** si el pago supera lo consumido (no hay saldo a favor) |
-| `POST /{creditLimitId}/restore-credit` | `{ "amount": 1500.00, "currency": "ARS", "originalTransactionDate": "2026-11-03", "description": "Reverso de …", "operationId": "7a2d…" }` | Deshace un consumo (reverso o devolución): disponible y cupo diario y mensual del período de la transacción original. Si ya se pagó, el excedente no se restaura (se loguea) |
+| `POST /{creditLimitId}/restore-credit` | `{ "amount": 1500.00, "currency": "ARS", "originalTransactionDate": "2026-11-03", "description": "Reverso de …", "operationId": "7a2d…", "cashAdvance": false }` | Deshace un consumo (reverso o devolución): disponible y cupo diario y mensual del período de la transacción original; con `cashAdvance: true` (la original fue un adelanto), también lo usado en adelantos. Si ya se pagó, el excedente no se restaura (se loguea) |
 | `POST /{creditLimitId}/operations/{operationId}/cancel` | — | Deshace exactamente un consumo, una restauración o una liberación (ver abajo). Responde `{ "operationId", "outcome", "availableCredit", "currency", "overLimitAmount" }` |
 
 Respuesta **200** `CreditLimitResponse`, con el `operationId` de la operación (el del request o el generado). `description` es obligatoria y se guarda en `credit_operations`.
@@ -293,7 +301,7 @@ Respuesta **200** siempre que exista el límite (aunque la operación se rechace
 Orden en que se evalúan los motivos de rechazo:
 
 0. Tarjeta no activa (`"La tarjeta no está activa"`).
-1. Límite de compras (o de adelantos).
+1. Límite de compras (o, en un adelanto, adelantos habilitados y disponible para adelantos: tope − usado).
 2. Crédito disponible.
 3. Límite diario.
 4. Límite mensual.
@@ -381,6 +389,7 @@ No hay jobs programados. Al leer o consumir, `DailyLimit` y `MonthlyLimit` compa
 | `card_id` | `varchar(36)` | no | `UNIQUE`, índice `idx_credit_limit_card_id` |
 | `purchase_limit_amount` / `_currency` | `numeric(15,2)` / `varchar(3)` | no | |
 | `cash_advance_limit_amount` / `_currency` | `numeric(15,2)` / `varchar(3)` | no | |
+| `cash_advance_consumed` | `numeric(15,2)` | no | Usado en adelantos (V18, default 0). `CHECK` 0 ≤ valor ≤ `consumed_credit_amount` |
 | `consumed_credit_amount` / `_currency` | `numeric(15,2)` / `varchar(3)` | no | |
 | `available_credit_amount` / `_currency` | `numeric(15,2)` / `varchar(3)` | no | Valor derivado, persistido |
 | `daily_limit_amount` / `_currency` | `numeric(15,2)` / `varchar(3)` | no | |
@@ -418,7 +427,7 @@ Todos los movimientos de crédito (V12; `RELEASE` desde V17), uno por `operation
 
 - `operation_id` (PK, hasta 64 caracteres): el del cliente o `auto-<uuid>` si no mandó uno. `credit_limit_id` (FK a `credit_limits`).
 - `operation_type` (`CONSUME_PURCHASE`, `CONSUME_CASH_ADVANCE`, `RESTORE` o `RELEASE`; nulo en las `VOIDED`) y `status` (`APPLIED`, `CANCELLED` o `VOIDED`).
-- `credit_delta`, `daily_delta`, `monthly_delta`: lo que movió la operación (positivo = consumió, negativo = devolvió), en `currency`.
+- `credit_delta`, `daily_delta`, `monthly_delta` y `cash_advance_delta` (V18): lo que movió la operación en lo consumido, el cupo diario, el mensual y lo usado en adelantos (positivo = consumió, negativo = devolvió), en `currency`. Cancelar deshace exactamente esos deltas.
 - `applied_on`: fecha en que se aplicó (define si el cupo diario y mensual todavía se pueden revertir).
 - `description`, `created_at` y `cancelled_at`.
 
@@ -434,7 +443,7 @@ Transactional outbox de card-limits (V15), con la misma estructura que `outbox_e
 
 ### 6.6 Notas
 
-- **Esquema:** lo crea Flyway desde el repo `card-management-database`: `credit_limits` en V2, `credit_limit_history` en V3, `credit_operations` en V12 (`RELEASE` admitido desde V17) y `credit_limit_outbox_events` en V15. Este módulo usa `ddl-auto: validate` con Flyway deshabilitado, así que las tablas deben existir antes del arranque.
+- **Esquema:** lo crea Flyway desde el repo `card-management-database`: `credit_limits` en V2, `credit_limit_history` en V3, `credit_operations` en V12 (`RELEASE` admitido desde V17), `credit_limit_outbox_events` en V15 y el uso de adelantos (`cash_advance_consumed`, `cash_advance_delta`) en V18. Este módulo usa `ddl-auto: validate` con Flyway deshabilitado, así que las tablas deben existir antes del arranque.
 - **Restricciones de la migración que el código no refleja:**
   - `credit_limits.card_id` → FK a `cards(id)` (`ON DELETE CASCADE`).
   - `chk_consumed_not_negative`: `consumed_credit_amount`, `daily_limit_consumed` y `monthly_limit_consumed` ≥ 0.
@@ -503,8 +512,7 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 
 ### 9.2 Reglas de negocio
 
-2. **Adelantos no acumulativos.** No se registra cuánto se usó en adelantos: cada adelanto se compara contra el tope completo, así que varios adelantos pueden superarlo en total.
-3. **Asignaciones bajas con adelantos fallan.** Con el 30% por defecto, cualquier límite de compras menor a ARS 1.666,67 da un tope de adelantos menor al mínimo de ARS 500 y la asignación se rechaza (400). Sin adelantos (`cashAdvancePercentage: 0`) sí se pueden asignar.
-4. **Límites diario y mensual independientes del límite de compras.** Los defaults (100.000 / 500.000) se aplican aunque el límite de compras sea menor.
-5. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
-6. **Sin saldo a favor.** `restore-credit` baja lo consumido como mucho hasta cero. Si la tarjeta ya pagó el consumo que se devuelve, el excedente no se acredita y solo se loguea.
+2. **Asignaciones bajas con adelantos fallan.** Con el 30% por defecto, cualquier límite de compras menor a ARS 1.666,67 da un tope de adelantos menor al mínimo de ARS 500 y la asignación se rechaza (400). Sin adelantos (`cashAdvancePercentage: 0`) sí se pueden asignar.
+3. **Límites diario y mensual independientes del límite de compras.** Los defaults (100.000 / 500.000) se aplican aunque el límite de compras sea menor.
+4. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
+5. **Sin saldo a favor.** `restore-credit` baja lo consumido como mucho hasta cero. Si la tarjeta ya pagó el consumo que se devuelve, el excedente no se acredita y solo se loguea.

@@ -56,14 +56,17 @@ public class CreditOperation {
     private final Money creditDelta;
     private final Money dailyDelta;
     private final Money monthlyDelta;
+    /** Lo que movió en lo usado en adelantos (positivo = consumió adelanto, negativo = lo devolvió) */
+    private final Money cashAdvanceDelta;
     private final LocalDate appliedOn;
     private final String description;
     private final LocalDateTime createdAt;
     private LocalDateTime cancelledAt;
 
     private CreditOperation(String operationId, String creditLimitId, Type type, Status status,
-                            Money creditDelta, Money dailyDelta, Money monthlyDelta, LocalDate appliedOn,
-                            String description, LocalDateTime createdAt, LocalDateTime cancelledAt) {
+                            Money creditDelta, Money dailyDelta, Money monthlyDelta, Money cashAdvanceDelta,
+                            LocalDate appliedOn, String description, LocalDateTime createdAt,
+                            LocalDateTime cancelledAt) {
         this.operationId = Objects.requireNonNull(operationId, "operationId");
         this.creditLimitId = Objects.requireNonNull(creditLimitId, "creditLimitId");
         this.type = type;
@@ -71,6 +74,7 @@ public class CreditOperation {
         this.creditDelta = Objects.requireNonNull(creditDelta, "creditDelta");
         this.dailyDelta = Objects.requireNonNull(dailyDelta, "dailyDelta");
         this.monthlyDelta = Objects.requireNonNull(monthlyDelta, "monthlyDelta");
+        this.cashAdvanceDelta = Objects.requireNonNull(cashAdvanceDelta, "cashAdvanceDelta");
         this.appliedOn = Objects.requireNonNull(appliedOn, "appliedOn");
         this.description = description;
         this.createdAt = createdAt;
@@ -87,6 +91,7 @@ public class CreditOperation {
                 after.credit().subtract(before.credit()),
                 after.daily().subtract(before.daily()),
                 after.monthly().subtract(before.monthly()),
+                after.cashAdvance().subtract(before.cashAdvance()),
                 LocalDate.now(), description, LocalDateTime.now(), null);
     }
 
@@ -97,15 +102,15 @@ public class CreditOperation {
         Money zero = Money.zero(currency);
         LocalDateTime now = LocalDateTime.now();
         return new CreditOperation(operationId, creditLimitId, null, Status.VOIDED,
-                zero, zero, zero, now.toLocalDate(), null, now, now);
+                zero, zero, zero, zero, now.toLocalDate(), null, now, now);
     }
 
     public static CreditOperation reconstitute(String operationId, String creditLimitId, Type type, Status status,
                                                Money creditDelta, Money dailyDelta, Money monthlyDelta,
-                                               LocalDate appliedOn, String description,
+                                               Money cashAdvanceDelta, LocalDate appliedOn, String description,
                                                LocalDateTime createdAt, LocalDateTime cancelledAt) {
         return new CreditOperation(operationId, creditLimitId, type, status, creditDelta, dailyDelta, monthlyDelta,
-                appliedOn, description, createdAt, cancelledAt);
+                cashAdvanceDelta, appliedOn, description, createdAt, cancelledAt);
     }
 
     public boolean isApplied() {

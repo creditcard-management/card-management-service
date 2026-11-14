@@ -84,6 +84,7 @@ class CreditLimitPersistenceTest {
     void savedLimitIsReadBackWithTheSameState() {
         CreditLimit limit = newLimit();
         limit.consumeForPurchase(ars("12345.67"));
+        limit.consumeForCashAdvance(ars("2000.50"));
         limit.updateTemporalLimits(ars("80000.00"), ars("300000.00"), "Ajuste", "analista");
         limit.updateCashAdvanceLimit(ars("0.00"), "Sin adelantos", "analista");
 
@@ -94,10 +95,11 @@ class CreditLimitPersistenceTest {
         assertThat(loaded.getPurchaseLimit()).isEqualTo(limit.getPurchaseLimit());
         assertThat(loaded.getCashAdvanceLimit()).isEqualTo(limit.getCashAdvanceLimit());
         assertThat(loaded.getCashAdvanceLimit().isEnabled()).isFalse();
-        assertThat(loaded.getConsumedCredit().getAmount()).isEqualTo(ars("12345.67"));
-        assertThat(loaded.getAvailableCredit().getAmount()).isEqualTo(ars("487654.33"));
+        assertThat(loaded.getConsumedCredit().getAmount()).isEqualTo(ars("14346.17"));
+        assertThat(loaded.getCashAdvanceConsumed().getAmount()).isEqualTo(ars("2000.50"));
+        assertThat(loaded.getAvailableCredit().getAmount()).isEqualTo(ars("485653.83"));
         assertThat(loaded.getDailyLimit()).isEqualTo(limit.getDailyLimit());
-        assertThat(loaded.getDailyLimit().getConsumed()).isEqualTo(ars("12345.67"));
+        assertThat(loaded.getDailyLimit().getConsumed()).isEqualTo(ars("14346.17"));
         assertThat(loaded.getDailyLimit().getResetDate()).isEqualTo(LocalDate.now());
         assertThat(loaded.getMonthlyLimit()).isEqualTo(limit.getMonthlyLimit());
         // Los timestamps los pone Hibernate (@CreationTimestamp / @UpdateTimestamp)

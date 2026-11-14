@@ -44,6 +44,9 @@ public class CreditOperationEntity {
     @Column(name = "monthly_delta", nullable = false, precision = 15, scale = 2)
     private BigDecimal monthlyDelta;
 
+    @Column(name = "cash_advance_delta", nullable = false, precision = 15, scale = 2)
+    private BigDecimal cashAdvanceDelta;
+
     @Column(name = "currency", nullable = false, length = 3)
     private String currency;
 

@@ -44,6 +44,7 @@ class CreditLimitEntityMapperTest {
                 PurchaseLimit.of(ars("500000.00")),
                 CashAdvanceLimit.of(cashAdvance),
                 ConsumedCredit.of(consumed),
+                ConsumedCredit.of(ars("7250.30")),
                 AvailableCredit.of(available),
                 DailyLimit.reconstituteFromPersistence(ars("80000.00"), ars("12345.67"), dailyResetDate),
                 MonthlyLimit.reconstituteFromPersistence(ars("300000.00"), ars("45000.10"), monthlyResetMonth),
@@ -77,6 +78,7 @@ class CreditLimitEntityMapperTest {
         assertThat(entity.getPurchaseLimitCurrency()).isEqualTo("ARS");
         assertThat(entity.getCashAdvanceLimitAmount()).isEqualByComparingTo("120000.00");
         assertThat(entity.getCashAdvanceLimitCurrency()).isEqualTo("ARS");
+        assertThat(entity.getCashAdvanceConsumed()).isEqualByComparingTo("7250.30");
         assertThat(entity.getConsumedCreditAmount()).isEqualByComparingTo("37500.55");
         assertThat(entity.getConsumedCreditCurrency()).isEqualTo("ARS");
         assertThat(entity.getAvailableCreditAmount()).isEqualByComparingTo("462499.45");
@@ -222,6 +224,7 @@ class CreditLimitEntityMapperTest {
         assertThat(actual.getPurchaseLimit()).isEqualTo(expected.getPurchaseLimit());
         assertThat(actual.getCashAdvanceLimit()).isEqualTo(expected.getCashAdvanceLimit());
         assertThat(actual.getConsumedCredit()).isEqualTo(expected.getConsumedCredit());
+        assertThat(actual.getCashAdvanceConsumed()).isEqualTo(expected.getCashAdvanceConsumed());
         assertThat(actual.getAvailableCredit()).isEqualTo(expected.getAvailableCredit());
         assertThat(actual.getDailyLimit()).isEqualTo(expected.getDailyLimit());
         assertThat(actual.getMonthlyLimit()).isEqualTo(expected.getMonthlyLimit());

@@ -32,6 +32,12 @@ public class CreditLimitResponse {
     @Schema(description = "Límite de adelantos")
     private BigDecimal cashAdvanceLimit;
 
+    @Schema(description = "Usado en adelantos (parte de lo consumido)")
+    private BigDecimal cashAdvanceConsumed;
+
+    @Schema(description = "Disponible para adelantos: tope menos lo usado (cero si el tope quedó por debajo)")
+    private BigDecimal cashAdvanceAvailable;
+
     @Schema(description = "Crédito disponible")
     private BigDecimal availableCredit;
 
