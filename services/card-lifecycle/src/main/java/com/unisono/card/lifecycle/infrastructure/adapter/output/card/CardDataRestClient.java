@@ -75,6 +75,12 @@ public class CardDataRestClient implements CardDataClient {
     }
 
     @Override
+    public void unblock(CardId cardId, String reason, String performedBy) {
+        log.info("Desbloqueando tarjeta vía REST: {}", cardId.getValue());
+        post(cardUrl(cardId) + "/unblock", transitionBody(reason, performedBy), "desbloquear", cardId);
+    }
+
+    @Override
     public void cancel(CardId cardId, String reason, String performedBy) {
         log.info("Cancelando tarjeta vía REST: {}", cardId.getValue());
         post(cardUrl(cardId) + "/cancel", transitionBody(reason, performedBy), "cancelar", cardId);

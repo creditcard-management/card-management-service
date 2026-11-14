@@ -86,12 +86,16 @@ class CardDataRestClientTest {
     }
 
     @Test
-    void blocksAndCancelsWithReason() {
+    void blocksUnblocksAndCancelsWithReason() {
         server.expect(requestTo(CARD_URL + "/block")).andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.reason").value("Pérdida"))
                 .andExpect(jsonPath("$.performedBy").value("usuario"))
                 .andRespond(withSuccess("{\"status\":\"BLOCKED\"}", MediaType.APPLICATION_JSON));
         server.expect(requestTo(CARD_URL + "/block-fraud")).andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess());
+        server.expect(requestTo(CARD_URL + "/unblock")).andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.reason").value("Recuperada"))
+                .andExpect(jsonPath("$.performedBy").value("operador"))
                 .andRespond(withSuccess());
         server.expect(requestTo(CARD_URL + "/cancel")).andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.reason").value("Baja"))
@@ -99,6 +103,7 @@ class CardDataRestClientTest {
 
         client.block(CARD_ID, "Pérdida", "usuario");
         client.blockForFraud(CARD_ID, "Fraude", "antifraude");
+        client.unblock(CARD_ID, "Recuperada", "operador");
         client.cancel(CARD_ID, "Baja", "cliente");
 
         server.verify();

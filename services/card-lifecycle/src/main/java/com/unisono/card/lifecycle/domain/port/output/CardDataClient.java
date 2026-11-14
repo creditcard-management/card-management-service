@@ -24,6 +24,9 @@ public interface CardDataClient {
     /** Bloqueo por fraude (POST /block-fraud). */
     void blockForFraud(CardId cardId, String reason, String performedBy);
 
+    /** Desbloqueo (POST /unblock): card-data vuelve a ACTIVE y limpia block_reason, blocked_at e intentos de PIN. */
+    void unblock(CardId cardId, String reason, String performedBy);
+
     /** Cancelación (POST /cancel): card-data registra cancelled_reason y cancelled_at. */
     void cancel(CardId cardId, String reason, String performedBy);
 

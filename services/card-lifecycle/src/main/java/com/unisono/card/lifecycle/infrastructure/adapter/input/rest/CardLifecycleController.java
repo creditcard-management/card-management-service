@@ -8,6 +8,7 @@ import com.unisono.card.lifecycle.domain.port.input.CancelCardUseCase;
 import com.unisono.card.lifecycle.domain.port.input.GetLifecycleHistoryUseCase;
 import com.unisono.card.lifecycle.domain.port.input.IssueCardUseCase;
 import com.unisono.card.lifecycle.domain.port.input.RejectCardUseCase;
+import com.unisono.card.lifecycle.domain.port.input.UnblockCardUseCase;
 import com.unisono.card.lifecycle.infrastructure.adapter.input.rest.dto.*;
 import com.unisono.card.lifecycle.infrastructure.adapter.input.rest.mapper.LifecycleDtoMapper;
 import com.unisono.card.shared.domain.valueobject.*;
@@ -39,6 +40,7 @@ public class CardLifecycleController {
     private final ActivateCardUseCase activateCardUseCase;
     private final RejectCardUseCase rejectCardUseCase;
     private final BlockCardUseCase blockCardUseCase;
+    private final UnblockCardUseCase unblockCardUseCase;
     private final CancelCardUseCase cancelCardUseCase;
 
     // =============================================
@@ -199,6 +201,32 @@ public class CardLifecycleController {
         } else {
             blockCardUseCase.executeBlock(command);
         }
+
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/{cardId}/unblock")
+    @Operation(summary = "Desbloquear tarjeta",
+            description = "Reactiva una tarjeta con bloqueo temporal (BLOCKED → ACTIVE). "
+                    + "Una tarjeta bloqueada por fraude no se puede desbloquear")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Tarjeta desbloqueada exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "404", description = "Tarjeta no encontrada"),
+            @ApiResponse(responseCode = "422", description = "La tarjeta no está bloqueada o está bloqueada por fraude"),
+            @ApiResponse(responseCode = "502", description = "card-data no disponible o con error inesperado")
+    })
+    public ResponseEntity<Void> unblockCard(
+            @PathVariable String cardId,
+            @Valid @RequestBody UnblockCardRequest request
+    ) {
+        log.info("REST: Desbloqueando tarjeta: {}", cardId);
+
+        unblockCardUseCase.execute(new UnblockCardUseCase.UnblockCardCommand(
+                CardId.of(cardId),
+                request.getReason(),
+                request.getUnblockedBy()
+        ));
 
         return ResponseEntity.ok().build();
     }
