@@ -114,24 +114,3 @@ springdoc:
     operations-sorter: method
     tags-sorter: alpha
   show-actuator: true
-
-# =============================================
-# Custom Application Properties
-# =============================================
-credit-limits:
-  # Límites por defecto
-  defaults:
-    daily-limit: 100000.00
-    monthly-limit: 500000.00
-    cash-advance-percentage: 0.30
-
-  # Validaciones
-  validation:
-    min-purchase-limit: 1000.00
-    max-purchase-limit: 10000000.00
-    strict-mode: true
-
-  # Auditoría
-  audit:
-    enabled: true
-    retention-days: 365
