@@ -509,7 +509,3 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 5. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
 6. **Registro de movimientos incompleto.** Solo los consumos y restauraciones con `operationId` quedan en `credit_operations`. Los que llegan sin id y las liberaciones (pago del resumen) no dejan registro ni son idempotentes.
 7. **Sin saldo a favor.** `restore-credit` baja lo consumido como mucho hasta cero. Si la tarjeta ya pagó el consumo que se devuelve, el excedente no se acredita y solo se loguea.
-
-### 9.3 Técnicas
-
-8. **Sin test del mapeo de persistencia.** `CreditLimitEntityMapper` (ida y vuelta de todos los campos del límite, incluidos los cupos diario y mensual, y del historial) solo se prueba indirectamente desde los tests de outbox y de concurrencia.
