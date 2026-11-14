@@ -5,6 +5,7 @@ import com.unisono.card.shared.domain.valueobject.CardId;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,11 @@ public class CardExpirationScheduler {
     private final int batchSize;
     private final Counter expiredCounter;
 
+    /**
+     * El que usa Spring. Con dos constructores tiene que estar marcado: si no, Spring busca uno sin argumentos
+     * y el contexto no arranca ("No default constructor found").
+     */
+    @Autowired
     public CardExpirationScheduler(
             ExpireCardsUseCase expireCards,
             MeterRegistry meterRegistry,
@@ -39,6 +45,7 @@ public class CardExpirationScheduler {
         this(expireCards, meterRegistry, Clock.system(ZoneId.of(zone)), batchSize);
     }
 
+    /** Para tests: con un reloj fijo */
     CardExpirationScheduler(ExpireCardsUseCase expireCards, MeterRegistry meterRegistry, Clock clock, int batchSize) {
         this.expireCards = expireCards;
         this.clock = clock;
