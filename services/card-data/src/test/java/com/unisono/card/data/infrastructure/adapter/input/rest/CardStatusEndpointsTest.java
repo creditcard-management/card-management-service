@@ -26,7 +26,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -45,10 +44,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * y un repositorio en memoria. Usa el mismo ObjectMapper que la aplicación.
  */
 class CardStatusEndpointsTest {
-
-    private static final String VALID_CARD_DATA = """
-            {"cardNumber":"4532015112830366","cvv":"123","pin":"4821","expirationMonth":12,"expirationYear":%d}
-            """;
 
     private record EnqueuedEvent(String topic, String key, DomainEvent event) {}
 
@@ -127,56 +122,6 @@ class CardStatusEndpointsTest {
                 .andExpect(status().isNotFound());
     }
 
-    // ========== PUT /card-data ==========
-
-    @Test
-    void shouldLoadCardData() throws Exception {
-        approve();
-
-        putJson("/card-data", VALID_CARD_DATA.formatted(LocalDate.now().getYear() + 2))
-                .andExpect(status().isOk());
-
-        Card card = storedCard();
-        assertThat(card.getCardNumber().getLastFourDigits()).isEqualTo("0366");
-        assertThat(card.getExpirationDate()).isNotNull();
-        assertThat(card.getIssuedAt()).isNotNull();
-    }
-
-    @Test
-    void shouldReturn400ForNonNumericCardNumber() throws Exception {
-        putJson("/card-data", VALID_CARD_DATA.formatted(LocalDate.now().getYear() + 2)
-                .replace("4532015112830366", "45320A5112830366"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.fieldErrors.cardNumber").exists());
-    }
-
-    @Test
-    void shouldReturn400ForPastExpirationYear() throws Exception {
-        putJson("/card-data", VALID_CARD_DATA.formatted(LocalDate.now().getYear() - 1))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Validation Error"));
-    }
-
-    @Test
-    void shouldReturn400ForNonNumericExpirationYear() throws Exception {
-        putJson("/card-data", VALID_CARD_DATA.formatted(2030).replace("2030", "\"x\""))
-                .andExpect(status().isBadRequest());
-    }
-
-    // ========== PUT /activated-at ==========
-
-    @Test
-    void shouldStoreActivationDate() throws Exception {
-        putJson("/activated-at", "{\"activatedAt\":\"2026-11-02T10:15:30\"}").andExpect(status().isOk());
-
-        assertThat(storedCard().getActivatedAt()).isEqualTo(LocalDateTime.of(2026, 11, 2, 10, 15, 30));
-    }
-
-    @Test
-    void shouldReturn400ForMalformedActivationDate() throws Exception {
-        putJson("/activated-at", "{\"activatedAt\":\"no-es-fecha\"}").andExpect(status().isBadRequest());
-    }
-
     // ========== POST /issue (emisión atómica) ==========
 
     @Test
@@ -233,6 +178,24 @@ class CardStatusEndpointsTest {
         postJson("/issue", issueBody(LocalDate.now().getYear() + 2).replace("\"cardNumber\":\"4532015112830366\",", ""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.cardNumber").exists());
+    }
+
+    @Test
+    void shouldReturn400WhenIssuancePanIsNotNumeric() throws Exception {
+        approve();
+
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2).replace("4532015112830366", "45320A5112830366"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.cardNumber").exists());
+    }
+
+    @Test
+    void shouldReturn400WhenIssuanceExpirationYearIsNotNumeric() throws Exception {
+        approve();
+
+        postJson("/issue", issueBody(2030).replace("2030", "\"x\""))
+                .andExpect(status().isBadRequest());
+        assertThat(storedCard().getStatus()).isEqualTo(CardStatus.APPROVED);
     }
 
     // ========== POST /activate (activación atómica) ==========
@@ -293,8 +256,7 @@ class CardStatusEndpointsTest {
     @Test
     void shouldCompleteLifecycleFlowAndBlockUnblock() throws Exception {
         approve();
-        putJson("/card-data", VALID_CARD_DATA.formatted(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
-        putJson("/status", "{\"status\":\"ISSUED\"}").andExpect(status().isOk());
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
         putJson("/status", "{\"status\":\"ACTIVE\"}").andExpect(status().isOk());
 
         mockMvc.perform(post("/api/v1/cards/" + cardId + "/unblock"))
@@ -325,9 +287,7 @@ class CardStatusEndpointsTest {
     void shouldEnqueueOneEventPerTransitionWithReasonAndAuthor() throws Exception {
         putJson("/status", "{\"status\":\"APPROVED\",\"reason\":\"Cumple\",\"performedBy\":\"admin\"}")
                 .andExpect(status().isOk());
-        putJson("/card-data", VALID_CARD_DATA.formatted(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
-        putJson("/status", "{\"status\":\"ISSUED\",\"reason\":\"Emisión\",\"performedBy\":\"emisor\"}")
-                .andExpect(status().isOk());
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
         putJson("/status", "{\"status\":\"ACTIVE\",\"reason\":\"App\",\"performedBy\":\"cliente\"}")
                 .andExpect(status().isOk());
         postJson("/block-fraud", "{\"reason\":\"Consumos raros\",\"performedBy\":\"antifraude\"}")
@@ -430,8 +390,7 @@ class CardStatusEndpointsTest {
     @Test
     void shouldNeverPublishSensitiveData() throws Exception {
         putJson("/status", "{\"status\":\"APPROVED\"}").andExpect(status().isOk());
-        putJson("/card-data", VALID_CARD_DATA.formatted(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
-        putJson("/status", "{\"status\":\"ISSUED\"}").andExpect(status().isOk());
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
 
         String json = new KafkaProducerConfig().objectMapper().writeValueAsString(eventAt(1));
 

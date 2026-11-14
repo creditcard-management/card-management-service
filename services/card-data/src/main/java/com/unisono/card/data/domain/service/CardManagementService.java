@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -188,54 +187,5 @@ public class CardManagementService implements CreateCardUseCase, GetCardUseCase,
         log.info("Tarjeta activada exitosamente: {}", cardId);
 
         return savedCard;
-    }
-
-    /**
-     * Actualiza la fecha de activación.
-     *
-     * @deprecated card-lifecycle usa {@link #activate}, que registra la fecha junto con el cambio de estado
-     */
-    @Deprecated
-    public void updateActivatedAt(CardId cardId, LocalDateTime activatedAt) {
-        log.info("Actualizando fecha de activación de tarjeta: {}", cardId);
-
-        Card card = getCardOrThrow(cardId);
-
-        card.setActivatedAt(activatedAt);
-
-        cardRepository.save(card);
-
-        log.info("Fecha de activación actualizada exitosamente");
-    }
-
-    /**
-     * Actualiza los datos de la tarjeta (número, cvv, pin, expiración) sin cambiar el estado.
-     *
-     * @deprecated card-lifecycle usa {@link #issue}, que carga los datos y emite en un solo paso
-     */
-    @Deprecated
-    public void updateCardData(
-            CardId cardId,
-            String cardNumber,
-            String cvv,
-            String pin,
-            int expirationMonth,
-            int expirationYear
-    ) {
-        log.info("Actualizando datos de tarjeta: {}", cardId);
-
-        Card card = getCardOrThrow(cardId);
-
-        // Crear Value Objects (InvalidValueObjectException si el formato es inválido)
-        CardNumber cardNumberVO = CardNumber.of(cardNumber);
-        CVV cvvVO = CVV.of(cvv);
-        PIN pinVO = PIN.of(pin);
-        ExpirationDate expirationDate = ExpirationDate.forIssuance(expirationMonth, expirationYear);
-
-        card.updateCardData(cardNumberVO, cvvVO, pinVO, expirationDate);
-
-        cardRepository.save(card);
-
-        log.info("Datos de tarjeta actualizados exitosamente");
     }
 }

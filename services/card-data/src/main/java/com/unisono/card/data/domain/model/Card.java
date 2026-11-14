@@ -189,11 +189,6 @@ public class Card {
         }
     }
 
-    public void setActivatedAt(LocalDateTime activatedAt) {
-        this.activatedAt = activatedAt;
-        this.updatedAt = LocalDateTime.now();
-    }
-
     public void updateCardData(
             CardNumber cardNumber,
             CVV cvv,

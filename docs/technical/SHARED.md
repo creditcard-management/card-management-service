@@ -144,7 +144,7 @@ Mes/año de vencimiento. Distingue dos usos:
 - **Ventana de emisión:** no vencida (mes actual inclusive) y año ≤ año actual + 10.
 - Todos los errores son `InvalidValueObjectException` (→ 400), incluidos los de parseo.
 
-Uso de `forIssuance`: `CardManagementService.updateCardData` (card-data) y el endpoint de emisión de card-lifecycle (`CardLifecycleController`, `LifecycleDtoMapper`). El resto usa `of`.
+Uso de `forIssuance`: `CardManagementService.issue` (card-data) y el endpoint de emisión de card-lifecycle (`CardLifecycleController`, `LifecycleDtoMapper`). El resto usa `of`.
 
 Métodos:
 
