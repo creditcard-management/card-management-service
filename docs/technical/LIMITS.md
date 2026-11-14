@@ -156,7 +156,7 @@ Antes de asignar, el servicio consulta `cards` (lectura directa por JPA):
 - Debe estar en `APPROVED` o `ISSUED` y no estar eliminada → si no, **422** (`"La tarjeta no puede recibir límite de crédito en su estado actual"`).
 - No puede tener ya un límite activo → **422** (`"La tarjeta ya tiene un límite de crédito asignado"`).
 
-Consumir, liberar y validar **no verifican el estado de la tarjeta** (ver §9).
+Consumir y validar exigen que la tarjeta esté `ACTIVE` y no eliminada (§4.4 y §4.5). Restaurar, liberar y cancelar no miran el estado: los reversos, devoluciones y pagos de una tarjeta bloqueada tienen que poder aplicarse.
 
 ---
 
@@ -499,25 +499,17 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 
 ### 9.1 Críticas
 
-1. ~~**Control de concurrencia parcial.**~~ Resuelto: todas las modificaciones bloquean la fila (`PESSIMISTIC_WRITE`). Falta un test de concurrencia contra PostgreSQL (#16).
-2. **Solo funciona en ARS.** Los mínimos y máximos de los VO, `Money.zero()` y los límites diario y mensual por defecto están en ARS. Asignar o consumir en otra moneda se rechaza con 422 (“Cannot operate on different currencies”).
+1. **Solo funciona en ARS.** Los mínimos y máximos de los VO, `Money.zero()` y los límites diario y mensual por defecto están en ARS. Asignar o consumir en otra moneda se rechaza con 422 (“Cannot operate on different currencies”).
 
 ### 9.2 Reglas de negocio
 
-3. **Adelantos no acumulativos.** No se registra cuánto se usó en adelantos: cada adelanto se compara contra el tope completo, así que varios adelantos pueden superarlo en total.
-4. ~~**Liberar más de lo consumido da 500.**~~ Resuelto: `releaseCredit` responde 422 si el pago supera lo consumido y `ConsumedCredit` no admite negativos.
-5. **Asignaciones bajas con adelantos fallan.** Con el 30% por defecto, cualquier límite de compras menor a ARS 1.666,67 da un tope de adelantos menor al mínimo de ARS 500 y la asignación se rechaza (400). Se pueden asignar con `cashAdvancePercentage: 0` (sin adelantos), que ya no se convierte en 30%.
-6. ~~**No se valida el estado de la tarjeta al consumir ni al validar.**~~ Resuelto: consumos (422) y `validate/*` (`approved: false`) exigen tarjeta `ACTIVE`; restauración, liberación y cancelación no (§4.4).
-7. **Límites diario y mensual independientes del límite de compras.** Los defaults (100.000 / 500.000) se aplican aunque el límite de compras sea menor. Ya se valida diario ≤ mensual y que ambos sean > 0; falta decidir si se acotan al límite de compras.
-8. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
-9. **Registro de movimientos incompleto.** Solo los consumos y restauraciones con `operationId` quedan en `credit_operations`. Los que llegan sin id y las liberaciones (pago del resumen) no dejan registro ni son idempotentes.
-10. **Sin saldo a favor.** `restore-credit` baja lo consumido como mucho hasta cero. Si la tarjeta ya pagó el consumo que se devuelve, el excedente no se acredita y solo se loguea.
+2. **Adelantos no acumulativos.** No se registra cuánto se usó en adelantos: cada adelanto se compara contra el tope completo, así que varios adelantos pueden superarlo en total.
+3. **Asignaciones bajas con adelantos fallan.** Con el 30% por defecto, cualquier límite de compras menor a ARS 1.666,67 da un tope de adelantos menor al mínimo de ARS 500 y la asignación se rechaza (400). Sin adelantos (`cashAdvancePercentage: 0`) sí se pueden asignar.
+4. **Límites diario y mensual independientes del límite de compras.** Los defaults (100.000 / 500.000) se aplican aunque el límite de compras sea menor.
+5. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
+6. **Registro de movimientos incompleto.** Solo los consumos y restauraciones con `operationId` quedan en `credit_operations`. Los que llegan sin id y las liberaciones (pago del resumen) no dejan registro ni son idempotentes.
+7. **Sin saldo a favor.** `restore-credit` baja lo consumido como mucho hasta cero. Si la tarjeta ya pagó el consumo que se devuelve, el excedente no se acredita y solo se loguea.
 
 ### 9.3 Técnicas
 
-11. ~~**Configuración ignorada.**~~ Resuelto: se borraron `credit-limits.*` del perfil y el `DataSource` propio con propiedades de MySQL.
-12. ~~**Archivos vacíos.**~~ Resuelto: se borraron.
-13. ~~**DTO ajeno.**~~ Resuelto: se borró `LifecycleHistoryResponse`.
-14. ~~**Dos endpoints de asignación con reglas distintas para el `cardId`.**~~ Resuelto: `POST /cards/{cardId}` exige que el `cardId` del body coincida con el del path (400).
-15. ~~**Servicios declarados dos veces.**~~ Resuelto: se borró `CreditLimitUseCaseConfig`; los servicios son `@Service`.
-16. **Tests incompletos:** `CreditLimitRestoreTest` (dominio de `restoreConsumption` y `revertOperation`), `CreditLimitControllerTest` y `CreditOperationIdempotencyTest` (idempotencia, cancelación y anulación, con repositorios en memoria, y los eventos `consumed`/`released`), `CreditLimitChangeEventsTest` (`assigned`/`updated`), `CreditLimitOutboxRelayTest` y `CreditLimitOutboxPersistenceTest` (outbox contra PostgreSQL con Testcontainers). Faltan tests de persistencia del límite y del lock.
+8. **Sin test del mapeo de persistencia.** `CreditLimitEntityMapper` (ida y vuelta de todos los campos del límite, incluidos los cupos diario y mensual, y del historial) solo se prueba indirectamente desde los tests de outbox y de concurrencia.
