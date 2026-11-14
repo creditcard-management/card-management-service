@@ -13,6 +13,7 @@ import com.unisono.card.limits.domain.port.input.GetCreditInfoUseCase;
 import com.unisono.card.limits.domain.port.input.RecalculateAvailableCreditUseCase;
 import com.unisono.card.limits.domain.port.input.UpdateCreditLimitUseCase;
 import com.unisono.card.shared.domain.exception.NotFoundException;
+import com.unisono.card.shared.domain.exception.ValidationException;
 import com.unisono.card.shared.domain.valueobject.CardId;
 import com.unisono.card.shared.domain.valueobject.Money;
 import io.swagger.v3.oas.annotations.Operation;
@@ -55,7 +56,7 @@ public class CreditLimitController {
             description = "Asigna límites de crédito a una tarjeta")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Límite asignado exitosamente"),
-            @ApiResponse(responseCode = "400", description = "Datos inválidos"),
+            @ApiResponse(responseCode = "400", description = "Datos inválidos o cardId del body distinto al de la URL"),
             @ApiResponse(responseCode = "404", description = "Tarjeta no encontrada"),
             @ApiResponse(responseCode = "422", description = "Tarjeta no elegible o con límite ya asignado")
     })
@@ -66,7 +67,12 @@ public class CreditLimitController {
     ) {
         log.info("Assigning credit limit to card: {}", cardId);
 
-        // Construir el command
+        // Misma regla que POST /: el body manda y el cardId de la URL debe coincidir
+        if (!cardId.equals(request.getCardId())) {
+            throw new ValidationException(String.format(
+                    "El cardId del body (%s) no coincide con el de la URL (%s)", request.getCardId(), cardId));
+        }
+
         AssignCreditLimitUseCase.AssignCreditLimitCommand command =
                 new AssignCreditLimitUseCase.AssignCreditLimitCommand(
                         CardId.of(cardId),
@@ -81,10 +87,7 @@ public class CreditLimitController {
                         request.getAssignedBy()
                 );
 
-        // Ejecutar use case
         CreditLimit creditLimit = assignCreditLimitUseCase.execute(command);
-
-        // Convertir a response
         CreditLimitResponse response = mapper.toResponse(creditLimit);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);

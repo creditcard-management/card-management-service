@@ -53,6 +53,18 @@ class CreditValidationServiceTest {
     }
 
     @Test
+    void cashAdvanceOnACardWithoutAdvancesIsRejectedWithItsReason() {
+        when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(true);
+        when(creditLimitRepository.findByCardId(CARD_ID))
+                .thenReturn(Optional.of(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0, "test")));
+
+        ValidationResult advance = service.validateCashAdvance(new ValidateCashAdvanceCommand(CARD_ID, Money.ofARS(1_000)));
+
+        assertThat(advance.approved()).isFalse();
+        assertThat(advance.reason()).isEqualTo(CreditLimit.NO_CASH_ADVANCE);
+    }
+
+    @Test
     void inactiveCardIsRejectedWithItsReason() {
         when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(false);
 

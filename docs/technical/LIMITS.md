@@ -110,7 +110,7 @@ com.unisono.card.limits
 | VO | Reglas |
 |---|---|
 | `PurchaseLimit` | Entre **ARS 1.000** y **ARS 10.000.000**. `increase` / `decrease` revalidan el rango. |
-| `CashAdvanceLimit` | Entre **ARS 500** y **ARS 5.000.000**. Se calcula como `purchaseLimit × porcentaje` (0–1, por defecto 0,30). |
+| `CashAdvanceLimit` | **Cero** = sin adelantos (`isEnabled()` falso: todo adelanto se rechaza). Si es mayor a cero, entre **ARS 500** y **ARS 5.000.000**. Se calcula como `purchaseLimit × porcentaje` (0–1, por defecto 0,30). |
 | `ConsumedCredit` | `consume(+)` / `release(−)`. Nunca negativo (`ValidationException`); `releaseCredit` rechaza antes con 422 un pago mayor a lo consumido. |
 | `AvailableCredit` | `isSufficientFor(monto)`, `isExhausted()`. |
 | `DailyLimit` | Monto (por defecto **ARS 100.000**), consumido y `resetDate`. Si `resetDate ≠ hoy`, el disponible es el monto completo y el próximo consumo reinicia el contador. |
@@ -185,7 +185,7 @@ Base: `/api/v1/credit-limits`. Bodies validados con Bean Validation.
 | `cardId` | Obligatorio |
 | `purchaseLimitAmount` | Obligatorio, entre 1.000 y 10.000.000 |
 | `currency` | Obligatorio, 3 letras (en la práctica solo funciona `ARS`, ver §9) |
-| `cashAdvancePercentage` | Opcional, entre 0 y 1, por defecto 0,30 (un `0` o `null` explícitos también se toman como 0,30) |
+| `cashAdvancePercentage` | Opcional, entre 0 y 1, por defecto 0,30 (un `null` explícito también). **`0` = sin adelantos.** Si es mayor a 0, el tope resultante debe ser ≥ ARS 500 (400) |
 | `dailyLimitAmount`, `monthlyLimitAmount` | Opcionales, > 0; si no se envían quedan 100.000 y 500.000. El diario final no puede superar al mensual final (422) |
 | `assignedBy` | Obligatorio |
 
@@ -193,7 +193,7 @@ Respuesta **201** → `CreditLimitResponse`.
 
 #### `POST /api/v1/credit-limits/cards/{cardId}`
 
-Igual que el anterior, pero toma el `cardId` del path. El campo `cardId` del body sigue siendo obligatorio por validación, aunque se ignora.
+Igual que el anterior. El `cardId` del body es obligatorio y debe coincidir con el del path: si no, **400**.
 
 ### 4.2 Consultas
 
@@ -237,7 +237,8 @@ Igual que el anterior, pero toma el `cardId` del path. El campo `cardId` del bod
 ```
 
 - En `increase` y `decrease`, `amount` es la **diferencia** a sumar o restar.
-- En `update-cash-advance-limit`, `amount` es el **nuevo valor absoluto** del tope.
+- En `update-cash-advance-limit`, `amount` es el **nuevo valor absoluto** del tope. `0` deshabilita los adelantos; entre 0 y 500 es inválido (400).
+- En `increase` y `decrease`, `amount` debe ser mayor a cero (400).
 - `decrease` responde **422** si el nuevo límite de compras queda por debajo de lo consumido o del límite de adelantos (hay que bajar primero el de adelantos).
 
 `PUT /{creditLimitId}/update-temporal-limits`
@@ -505,7 +506,7 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 
 3. **Adelantos no acumulativos.** No se registra cuánto se usó en adelantos: cada adelanto se compara contra el tope completo, así que varios adelantos pueden superarlo en total.
 4. ~~**Liberar más de lo consumido da 500.**~~ Resuelto: `releaseCredit` responde 422 si el pago supera lo consumido y `ConsumedCredit` no admite negativos.
-5. **Asignaciones bajas fallan.** Con el 30% por defecto, cualquier límite de compras menor a ARS 1.666,67 da un tope de adelantos menor al mínimo de ARS 500 y la asignación se rechaza. Tampoco se puede asignar sin adelantos: `0` se convierte en 30%.
+5. **Asignaciones bajas con adelantos fallan.** Con el 30% por defecto, cualquier límite de compras menor a ARS 1.666,67 da un tope de adelantos menor al mínimo de ARS 500 y la asignación se rechaza (400). Se pueden asignar con `cashAdvancePercentage: 0` (sin adelantos), que ya no se convierte en 30%.
 6. ~~**No se valida el estado de la tarjeta al consumir ni al validar.**~~ Resuelto: consumos (422) y `validate/*` (`approved: false`) exigen tarjeta `ACTIVE`; restauración, liberación y cancelación no (§4.4).
 7. **Límites diario y mensual independientes del límite de compras.** Los defaults (100.000 / 500.000) se aplican aunque el límite de compras sea menor. Ya se valida diario ≤ mensual y que ambos sean > 0; falta decidir si se acotan al límite de compras.
 8. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
@@ -517,6 +518,6 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 11. ~~**Configuración ignorada.**~~ Resuelto: se borraron `credit-limits.*` del perfil y el `DataSource` propio con propiedades de MySQL.
 12. ~~**Archivos vacíos.**~~ Resuelto: se borraron.
 13. ~~**DTO ajeno.**~~ Resuelto: se borró `LifecycleHistoryResponse`.
-14. **Dos endpoints de asignación** (`POST /` y `POST /cards/{cardId}`) con reglas distintas para el `cardId`.
+14. ~~**Dos endpoints de asignación con reglas distintas para el `cardId`.**~~ Resuelto: `POST /cards/{cardId}` exige que el `cardId` del body coincida con el del path (400).
 15. ~~**Servicios declarados dos veces.**~~ Resuelto: se borró `CreditLimitUseCaseConfig`; los servicios son `@Service`.
 16. **Tests incompletos:** `CreditLimitRestoreTest` (dominio de `restoreConsumption` y `revertOperation`), `CreditLimitControllerTest` y `CreditOperationIdempotencyTest` (idempotencia, cancelación y anulación, con repositorios en memoria, y los eventos `consumed`/`released`), `CreditLimitChangeEventsTest` (`assigned`/`updated`), `CreditLimitOutboxRelayTest` y `CreditLimitOutboxPersistenceTest` (outbox contra PostgreSQL con Testcontainers). Faltan tests de persistencia del límite y del lock.

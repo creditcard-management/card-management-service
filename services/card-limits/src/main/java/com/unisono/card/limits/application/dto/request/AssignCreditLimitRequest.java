@@ -36,8 +36,8 @@ public class AssignCreditLimitRequest {
 
     @DecimalMin(value = "0.0", message = "El porcentaje debe ser al menos 0")
     @DecimalMax(value = "1.0", message = "El porcentaje no puede exceder 1 (100%)")
-    @Schema(description = "Porcentaje del límite de compras para adelantos", example = "0.30", defaultValue = "0.30")
-    @Builder.Default  // ⭐ AGREGAR ESTA ANOTACIÓN
+    @Schema(description = "Porcentaje del límite de compras para adelantos (0 = sin adelantos)", example = "0.30", defaultValue = "0.30")
+    @Builder.Default
     private Double cashAdvancePercentage = 0.30; // 30% por defecto
 
     @DecimalMin(value = "0.01", message = "El límite diario debe ser mayor a cero")

@@ -20,6 +20,8 @@ public interface AssignCreditLimitUseCase {
     /**
      * Command para asignar límite
      */
+    double DEFAULT_CASH_ADVANCE_PERCENTAGE = 0.30;
+
     record AssignCreditLimitCommand(
             CardId cardId,
             Money purchaseLimitAmount,
@@ -29,9 +31,9 @@ public interface AssignCreditLimitUseCase {
             String assignedBy
     ) {
         public AssignCreditLimitCommand {
-            // Valores por defecto si no se especifican
-            if (cashAdvancePercentage == null || cashAdvancePercentage == 0) {
-                cashAdvancePercentage = 0.30; // 30% por defecto
+            // 30% por defecto si no se especifica. Cero es explícito: sin adelantos
+            if (cashAdvancePercentage == null) {
+                cashAdvancePercentage = DEFAULT_CASH_ADVANCE_PERCENTAGE;
             }
         }
     }

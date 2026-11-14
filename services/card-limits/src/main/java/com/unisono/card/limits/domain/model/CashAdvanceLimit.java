@@ -9,7 +9,9 @@ import java.io.Serializable;
 
 /**
  * Value Object que representa el límite de adelantos en efectivo
- * Generalmente es un porcentaje del límite de compras (ej: 30%)
+ * Generalmente es un porcentaje del límite de compras (ej: 30%).
+ * Cero significa que la tarjeta no tiene adelantos habilitados; si es mayor a cero, debe estar entre
+ * {@link #MIN_LIMIT} y {@link #MAX_LIMIT}.
  */
 @Getter
 @EqualsAndHashCode
@@ -42,6 +44,9 @@ public class CashAdvanceLimit implements Serializable {
         if (percentage < 0 || percentage > 1) {
             throw new ValidationException("El porcentaje debe estar entre 0 y 1");
         }
+        if (percentage == 0) {
+            return zero(); // sin adelantos
+        }
 
         Money cashAdvanceAmount = purchaseLimit.getAmount()
                 .multiply(java.math.BigDecimal.valueOf(percentage));
@@ -54,9 +59,15 @@ public class CashAdvanceLimit implements Serializable {
             throw new ValidationException("El límite de adelantos no puede ser nulo");
         }
 
-        if (amount.isLessThan(MIN_LIMIT)) {
+        if (amount.isNegative()) {
+            throw new ValidationException("El límite de adelantos no puede ser negativo");
+        }
+
+        // Cero = sin adelantos; si hay adelantos, el tope tiene un mínimo
+        if (!amount.isZero() && amount.isLessThan(MIN_LIMIT)) {
             throw new ValidationException(
-                    String.format("El límite de adelantos debe ser al menos %s", MIN_LIMIT)
+                    String.format("El límite de adelantos debe ser al menos %s (o cero para no habilitar adelantos)",
+                            MIN_LIMIT)
             );
         }
 
@@ -68,10 +79,17 @@ public class CashAdvanceLimit implements Serializable {
     }
 
     /**
+     * La tarjeta tiene adelantos habilitados (tope mayor a cero)
+     */
+    public boolean isEnabled() {
+        return this.amount.isPositive();
+    }
+
+    /**
      * Verifica si un adelanto está dentro del límite
      */
     public boolean allows(Money advanceAmount) {
-        return !advanceAmount.isGreaterThan(this.amount);
+        return isEnabled() && !advanceAmount.isGreaterThan(this.amount);
     }
 
     @Override
