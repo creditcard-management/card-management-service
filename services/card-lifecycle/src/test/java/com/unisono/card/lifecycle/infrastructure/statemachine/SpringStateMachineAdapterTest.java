@@ -123,6 +123,18 @@ class SpringStateMachineAdapterTest {
     }
 
     @Test
+    void unblocksOnlyTemporaryBlock() {
+        assertThat(adapter.fire(CARD_ID, CardLifecycleState.BLOCKED, CardLifecycleEvent.UNBLOCK, context))
+                .isEqualTo(CardLifecycleState.ACTIVE);
+
+        for (CardLifecycleState from : java.util.List.of(CardLifecycleState.BLOCKED_FRAUD, CardLifecycleState.ACTIVE)) {
+            assertThatThrownBy(() -> adapter.fire(CARD_ID, from, CardLifecycleEvent.UNBLOCK, context))
+                    .as("%s -> UNBLOCK", from)
+                    .isInstanceOf(InvalidStateTransitionException.class);
+        }
+    }
+
+    @Test
     void cancelsFromBlockedButNotFromRequested() {
         assertThat(adapter.fire(CARD_ID, CardLifecycleState.BLOCKED, CardLifecycleEvent.CANCEL, context))
                 .isEqualTo(CardLifecycleState.CANCELLED);

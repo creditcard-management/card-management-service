@@ -206,12 +206,7 @@ public class CardStateMachineConfig extends EnumStateMachineConfigurerAdapter<Ca
                 // Desde BLOCKED_FRAUD
                 // ========================================
 
-                // BLOCKED_FRAUD → ACTIVE (requiere aprobación especial)
-                .withExternal()
-                .source(CardLifecycleState.BLOCKED_FRAUD)
-                .target(CardLifecycleState.ACTIVE)
-                .event(CardLifecycleEvent.UNBLOCK)
-                .and()
+                // Sin UNBLOCK: una tarjeta bloqueada por fraude no se reactiva, solo se cancela o vence
 
                 // BLOCKED_FRAUD → CANCELLED
                 .withExternal()

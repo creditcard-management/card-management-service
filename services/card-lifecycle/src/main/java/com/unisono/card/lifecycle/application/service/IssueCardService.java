@@ -15,8 +15,8 @@ import java.util.Map;
 import static com.unisono.card.lifecycle.domain.model.TransitionContext.*;
 
 /**
- * Emisión (APPROVED → ISSUED). Valida con la state machine (IssuanceGuard) y luego carga
- * los datos de emisión y el nuevo estado en card-data.
+ * Emisión (APPROVED → ISSUED). Valida con la state machine (IssuanceGuard) y emite en card-data
+ * con una sola llamada, que carga los datos de emisión y cambia el estado en la misma transacción.
  */
 @Slf4j
 @Service
@@ -42,17 +42,15 @@ public class IssueCardService implements IssueCardUseCase {
                 CardLifecycleEvent.ISSUE,
                 CardLifecycleState.ISSUED,
                 context,
-                () -> {
-                    cardDataClient.updateCardData(
-                            command.cardId(),
-                            command.cardNumber(),
-                            command.cvv(),
-                            command.pin(),
-                            command.expirationDate()
-                    );
-                    cardDataClient.updateStatus(command.cardId(), CardLifecycleState.ISSUED.name(),
-                            command.reason(), command.issuedBy());
-                }
+                () -> cardDataClient.issue(
+                        command.cardId(),
+                        command.cardNumber(),
+                        command.cvv(),
+                        command.pin(),
+                        command.expirationDate(),
+                        command.reason(),
+                        command.issuedBy()
+                )
         );
 
         log.info("Tarjeta emitida exitosamente: {}", command.cardId().getValue());

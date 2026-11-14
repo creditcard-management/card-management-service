@@ -11,8 +11,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-
 /**
  * Activación (ISSUED → ACTIVE).
  *
@@ -42,9 +40,8 @@ public class ActivateCardService implements ActivateCardUseCase {
                         throw new BusinessRuleException(
                                 "PIN incorrecto: no se puede activar la tarjeta " + command.cardId().getValue());
                     }
-                    cardDataClient.updateStatus(command.cardId(), CardLifecycleState.ACTIVE.name(),
-                            command.reason(), command.activatedBy());
-                    cardDataClient.updateActivatedAt(command.cardId(), LocalDateTime.now());
+                    // Estado y activated_at en una sola transacción de card-data
+                    cardDataClient.activate(command.cardId(), command.reason(), command.activatedBy());
                 }
         );
 

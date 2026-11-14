@@ -213,6 +213,33 @@ public class Card {
         this.updatedAt = LocalDateTime.now();
     }
 
+    /**
+     * Emisión (APPROVED → ISSUED): carga los datos de emisión y cambia el estado en un solo paso,
+     * para que no quede una tarjeta con datos pero sin emitir, ni emitida sin datos.
+     */
+    public void issue(CardNumber cardNumber, CVV cvv, PIN pin, ExpirationDate expirationDate) {
+        if (this.status != CardStatus.APPROVED) {
+            throw new BusinessRuleException(
+                    String.format("Solo se puede emitir una tarjeta aprobada. Estado actual: %s", this.status));
+        }
+        updateCardData(cardNumber, cvv, pin, expirationDate);
+        this.status = CardStatus.ISSUED;
+    }
+
+    /**
+     * Activación (ISSUED → ACTIVE): cambia el estado y registra la fecha de activación juntos.
+     * Desde un estado bloqueado no aplica: eso es un desbloqueo ({@link #unblock()}).
+     */
+    public void activate() {
+        if (this.status != CardStatus.ISSUED) {
+            throw new BusinessRuleException(
+                    String.format("Solo se puede activar una tarjeta emitida. Estado actual: %s", this.status));
+        }
+        this.status = CardStatus.ACTIVE;
+        this.activatedAt = LocalDateTime.now();
+        this.updatedAt = this.activatedAt;
+    }
+
     public void block(String reason) {
         validateCanBlock();
         this.status = CardStatus.BLOCKED;

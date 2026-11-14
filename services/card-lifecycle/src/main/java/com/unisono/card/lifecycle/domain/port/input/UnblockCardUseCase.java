@@ -11,7 +11,7 @@ public interface UnblockCardUseCase {
     /**
      * Desbloquea una tarjeta
      * BLOCKED → ACTIVE
-     * BLOCKED_FRAUD → ACTIVE
+     * (BLOCKED_FRAUD no se desbloquea: solo se cancela o vence)
      */
     StateTransition execute(UnblockCardCommand command);
 

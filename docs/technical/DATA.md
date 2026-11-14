@@ -24,7 +24,7 @@ flowchart LR
     Client[Cliente / Canal] -->|REST| CD[card-data :8081]
     CD -->|card.*| K[(Kafka)]
     K -->|card.created| CL[card-lifecycle :8083]
-    CL -->|PUT /status<br/>PUT /activated-at<br/>PUT /card-data| CD
+    CL -->|PUT /status<br/>POST /issue, /activate| CD
     PP[payment-processing :8085] -.->|validación de tarjeta| CD
     CD --> DB[(PostgreSQL<br/>tabla cards)]
 ```
@@ -73,12 +73,12 @@ com.unisono.card.data
 | `GetCardUseCase` | `CardManagementService` | `GET /{cardId}`, `GET /client/{clientId}`, `GET /search` |
 | `BlockCardUseCase` | `CardSecurityService` | `POST /{cardId}/block`, `POST /{cardId}/block-fraud` |
 | `UnblockCardUseCase` | `CardSecurityService` | `POST /{cardId}/unblock` |
-| `UpdateCardStatusUseCase` + métodos de `CardManagementService` | `CardManagementService` | `PUT /{cardId}/status`, `PUT /{cardId}/activated-at`, `PUT /{cardId}/card-data`, `POST /{cardId}/cancel` |
+| `UpdateCardStatusUseCase` + métodos de `CardManagementService` | `CardManagementService` | `PUT /{cardId}/status`, `POST /{cardId}/issue`, `POST /{cardId}/activate`, `POST /{cardId}/cancel`, `PUT /{cardId}/activated-at` y `PUT /{cardId}/card-data` (deprecados) |
 | `ValidatePINUseCase` | `PINManagementService` | `POST /{cardId}/validate-pin` |
 | `ResetPINUseCase` | `PINManagementService` | `POST /{cardId}/reset-pin` |
 | `ValidateCVVUseCase` | `CVVValidationService` | `POST /{cardId}/validate-cvv` |
 | `UpdateCardStatusUseCase` | `CardManagementService` | `PUT /{cardId}/status` |
-| *(métodos directos, sin port)* | `CardManagementService` | `PUT /{cardId}/activated-at`, `PUT /{cardId}/card-data` |
+| *(métodos directos, sin port)* | `CardManagementService` | `POST /{cardId}/issue`, `POST /{cardId}/activate`, `PUT /{cardId}/activated-at`, `PUT /{cardId}/card-data` |
 
 ---
 
@@ -111,7 +111,9 @@ com.unisono.card.data
 |---|---|
 | `create(clientId, holder, type, category)` | Valida no-nulos; nueva tarjeta en `REQUESTED` |
 | `updateStatus(status)` | Valida la transición con `CardStatus.canTransitionTo` y asigna el estado |
-| `updateCardData(pan, cvv, pin, exp)` | Carga datos de emisión; setea `issuedAt` |
+| `issue(pan, cvv, pin, exp)` | Exige `APPROVED`; carga los datos de emisión, setea `issuedAt` y pasa a `ISSUED` en un solo paso |
+| `activate()` | Exige `ISSUED` (desde un bloqueo es `unblock`); → `ACTIVE` y setea `activatedAt` |
+| `updateCardData(pan, cvv, pin, exp)` | Carga datos de emisión sin cambiar el estado; setea `issuedAt` |
 | `block(reason)` | Exige `CardStatus.canBlock()` (`ACTIVE` o `ISSUED`); → `BLOCKED`, guarda motivo y `blockedAt` |
 | `blockForFraud(reason)` | Igual que `block`; → `BLOCKED_FRAUD` |
 | `unblock()` | Exige estado bloqueado; → `ACTIVE`, limpia motivo y fecha y reinicia `pinFailedAttempts` |
@@ -173,8 +175,8 @@ stateDiagram-v2
     [*] --> REQUESTED: POST /cards
     REQUESTED --> APPROVED: card-lifecycle
     REQUESTED --> REJECTED: card-lifecycle
-    APPROVED --> ISSUED: card-lifecycle (PUT /card-data + /status)
-    ISSUED --> ACTIVE: card-lifecycle (PUT /status + /activated-at)
+    APPROVED --> ISSUED: card-lifecycle (POST /issue)
+    ISSUED --> ACTIVE: card-lifecycle (POST /activate)
     ACTIVE --> BLOCKED: POST /block
     ACTIVE --> BLOCKED_FRAUD: POST /block-fraud
     BLOCKED --> ACTIVE: POST /unblock
@@ -260,13 +262,15 @@ Busca por últimos 4 dígitos **acotado al cliente**. Respuesta **200** → `Car
 
 #### Endpoints internos (consumidos por `card-lifecycle`)
 
-Reciben DTOs validados con Bean Validation (`UpdateCardStatusRequest`, `UpdateActivatedAtRequest`, `UpdateCardDataRequest`) y responden **200** sin cuerpo. Errores: **400** si falta un campo o tiene formato inválido (incluido un estado inexistente o una fecha mal formada), **404** si la tarjeta no existe y **422** si la transición de estado no está permitida.
+Reciben DTOs validados con Bean Validation (`UpdateCardStatusRequest`, `IssueCardRequest`, `ActivateCardRequest`, …) y responden **200**: `PUT` sin cuerpo y `POST` con `CardResponse`. Un cambio concurrente sobre la misma tarjeta responde **409**. Errores: **400** si falta un campo o tiene formato inválido (incluido un estado inexistente o una fecha mal formada), **404** si la tarjeta no existe y **422** si la transición de estado no está permitida.
 
 | Método y ruta | Body | Efecto |
 |---|---|---|
 | `PUT /{cardId}/status` | `{ "status": "APPROVED", "reason": "…", "performedBy": "…" }` (`reason` opcional, máx. 500; `performedBy` opcional, máx. 100) | Cambia el estado validando la transición y publica el evento (§8) |
-| `PUT /{cardId}/activated-at` | `{ "activatedAt": "2026-11-02T10:15:30" }` | Fecha de activación (ISO-8601) |
-| `PUT /{cardId}/card-data` | `{ "cardNumber": "...", "cvv": "...", "pin": "...", "expirationMonth": 12, "expirationYear": 2030 }` | Carga datos de emisión; el PAN y el CVV se cifran y el PIN se hashea al persistir. PAN de 13–19 dígitos (+ Luhn), CVV de 3–4, PIN de 4, mes 1–12; el vencimiento no puede estar en el pasado ni a más de 10 años |
+| `POST /{cardId}/issue` | `{ "cardNumber": "...", "cvv": "...", "pin": "...", "expirationMonth": 12, "expirationYear": 2030, "reason": "…", "performedBy": "…" }` (`reason` y `performedBy` opcionales) | Emisión atómica: exige `APPROVED`, carga los datos de emisión, pasa a `ISSUED` y publica `card.issued` en una sola transacción. El PAN y el CVV se cifran y el PIN se hashea al persistir. PAN de 13–19 dígitos (+ Luhn), CVV de 3–4, PIN de 4, mes 1–12; el vencimiento no puede estar en el pasado ni a más de 10 años |
+| `POST /{cardId}/activate` | `{ "reason": "…", "performedBy": "…" }` (opcional) | Activación atómica: exige `ISSUED`, pasa a `ACTIVE`, registra `activated_at` y publica `card.activated` en una sola transacción. El PIN se valida antes con `validate-pin` |
+| `PUT /{cardId}/activated-at` *(deprecado)* | `{ "activatedAt": "2026-11-02T10:15:30" }` | Fecha de activación (ISO-8601). Reemplazado por `POST /activate` |
+| `PUT /{cardId}/card-data` *(deprecado)* | Igual que `POST /issue`, sin `reason` ni `performedBy` | Carga datos de emisión **sin cambiar el estado**. Reemplazado por `POST /issue` |
 | `POST /{cardId}/cancel` | `{ "reason": "Cliente solicitó cancelación", "performedBy": "…" }` (`reason` obligatorio, máx. 500; `performedBy` opcional) | → `CANCELLED` validando la transición; guarda `cancelled_reason` y `cancelled_at`. A diferencia del resto de la tabla, responde **200** `CardResponse` |
 
 ### 4.2 Seguridad (`CardSecurityController`)
@@ -406,8 +410,8 @@ sequenceDiagram
 ### 5.2 Emisión y activación (orquestadas por `card-lifecycle`)
 
 1. `card-lifecycle` recibe `card.created` y, al aprobar, llama `PUT /{id}/status` con `APPROVED`.
-2. En la emisión genera PAN, CVV, PIN y vencimiento → `PUT /{id}/card-data` y luego `PUT /{id}/status` con `ISSUED`.
-3. En la activación → `POST /{id}/validate-pin`, `PUT /{id}/status` con `ACTIVE` y `PUT /{id}/activated-at`.
+2. En la emisión genera PAN, CVV, PIN y vencimiento → `POST /{id}/issue` (datos + `ISSUED` en una transacción).
+3. En la activación → `POST /{id}/validate-pin` y luego `POST /{id}/activate` (`ACTIVE` + `activated_at` en una transacción).
 4. Rechazo → `PUT /{id}/status` con `REJECTED`; bloqueo → `POST /{id}/block` o `/block-fraud`; cancelación → `POST /{id}/cancel`.
 
 ### 5.3 Bloqueo / desbloqueo
@@ -676,5 +680,6 @@ Comportamientos actuales del código que conviene tener presentes:
 
 1. **Tests incompletos.** Hay tests de dominio, servicios, endpoints (MockMvc) y del relay; de persistencia, solo los del vencimiento y la concurrencia contra PostgreSQL (`CardExpirationPersistenceTest`, `CardOptimisticLockingPersistenceTest`, Testcontainers). `CardTest` y `CardManagementServiceTest` tienen todos sus tests comentados.
 2. `services/card-data/README.md` contiene la documentación de `card-shared`, no la de este módulo.
-3. **PIN en claro en tránsito fuera de los adelantos.** La emisión (`PUT /card-data`), el cambio de PIN (`reset-pin`) y la activación desde card-lifecycle (`validate-pin` con `pin`) siguen recibiendo el PIN en claro. Solo los adelantos (payment-processing) usan PIN block.
+3. **PIN en claro en tránsito fuera de los adelantos.** La emisión (`POST /issue`), el cambio de PIN (`reset-pin`) y la activación desde card-lifecycle (`validate-pin` con `pin`) siguen recibiendo el PIN en claro. Solo los adelantos (payment-processing) usan PIN block.
+4. **`PUT /status` todavía permite emitir y activar a mano.** `PUT /status` con `ISSUED` no exige datos de emisión y con `ACTIVE` no registra `activated_at`. card-lifecycle ya no lo usa para esos casos (`POST /issue` y `POST /activate`). Los endpoints `PUT /card-data` y `PUT /activated-at` quedaron deprecados y sin uso.
 

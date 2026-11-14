@@ -134,8 +134,68 @@ public class CardManagementService implements CreateCardUseCase, GetCardUseCase,
     }
 
     /**
-     * Actualiza la fecha de activación
+     * Emisión atómica (APPROVED → ISSUED): datos de emisión, estado y evento card.issued en una
+     * sola transacción. BusinessRuleException si la tarjeta no está aprobada;
+     * InvalidValueObjectException si algún dato es inválido.
      */
+    public Card issue(
+            CardId cardId,
+            String cardNumber,
+            String cvv,
+            String pin,
+            int expirationMonth,
+            int expirationYear,
+            String reason,
+            String performedBy
+    ) {
+        log.info("Emitiendo tarjeta: {}", cardId);
+
+        Card card = getCardOrThrow(cardId);
+        CardStatus previousStatus = card.getStatus();
+
+        card.issue(
+                CardNumber.of(cardNumber),
+                CVV.of(cvv),
+                PIN.of(pin),
+                ExpirationDate.forIssuance(expirationMonth, expirationYear)
+        );
+
+        Card savedCard = cardRepository.save(card);
+
+        eventEmitter.statusChanged(savedCard, previousStatus, reason, performedBy);
+
+        log.info("Tarjeta emitida exitosamente: {}", cardId);
+
+        return savedCard;
+    }
+
+    /**
+     * Activación atómica (ISSUED → ACTIVE): estado, fecha de activación y evento card.activated en
+     * una sola transacción. BusinessRuleException si la tarjeta no está emitida.
+     */
+    public Card activate(CardId cardId, String reason, String performedBy) {
+        log.info("Activando tarjeta: {}", cardId);
+
+        Card card = getCardOrThrow(cardId);
+        CardStatus previousStatus = card.getStatus();
+
+        card.activate();
+
+        Card savedCard = cardRepository.save(card);
+
+        eventEmitter.statusChanged(savedCard, previousStatus, reason, performedBy);
+
+        log.info("Tarjeta activada exitosamente: {}", cardId);
+
+        return savedCard;
+    }
+
+    /**
+     * Actualiza la fecha de activación.
+     *
+     * @deprecated card-lifecycle usa {@link #activate}, que registra la fecha junto con el cambio de estado
+     */
+    @Deprecated
     public void updateActivatedAt(CardId cardId, LocalDateTime activatedAt) {
         log.info("Actualizando fecha de activación de tarjeta: {}", cardId);
 
@@ -149,8 +209,11 @@ public class CardManagementService implements CreateCardUseCase, GetCardUseCase,
     }
 
     /**
-     * Actualiza los datos de la tarjeta (número, cvv, pin, expiración)
+     * Actualiza los datos de la tarjeta (número, cvv, pin, expiración) sin cambiar el estado.
+     *
+     * @deprecated card-lifecycle usa {@link #issue}, que carga los datos y emite en un solo paso
      */
+    @Deprecated
     public void updateCardData(
             CardId cardId,
             String cardNumber,

@@ -7,6 +7,7 @@ import com.unisono.card.lifecycle.domain.model.StateTransition;
 import com.unisono.card.lifecycle.domain.port.input.BlockCardUseCase.BlockCardCommand;
 import com.unisono.card.lifecycle.domain.port.input.CancelCardUseCase.CancelCardCommand;
 import com.unisono.card.lifecycle.domain.port.input.RejectCardUseCase.RejectCardCommand;
+import com.unisono.card.lifecycle.domain.port.input.UnblockCardUseCase.UnblockCardCommand;
 import com.unisono.card.lifecycle.domain.port.output.CardDataClient;
 import com.unisono.card.lifecycle.domain.port.output.LifecycleStateMachinePort;
 import com.unisono.card.lifecycle.domain.port.output.StateTransitionRepository;
@@ -43,6 +44,7 @@ class BlockAndCancelServicesTest {
     private BlockCardService blockService;
     private CancelCardService cancelService;
     private RejectCardService rejectService;
+    private UnblockCardService unblockService;
 
     @BeforeEach
     void setUp() {
@@ -51,6 +53,7 @@ class BlockAndCancelServicesTest {
         blockService = new BlockCardService(cardDataClient, executor);
         cancelService = new CancelCardService(cardDataClient, executor);
         rejectService = new RejectCardService(cardDataClient, executor);
+        unblockService = new UnblockCardService(cardDataClient, executor);
         lenient().when(transitionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -95,6 +98,37 @@ class BlockAndCancelServicesTest {
         assertThat(failed.isFailed()).isTrue();
         assertThat(failed.getFromState()).isEqualTo("REQUESTED");
         assertThat(failed.getToState()).isEqualTo("BLOCKED");
+    }
+
+    @Test
+    void unblockGoesThroughCardDataUnblockEndpoint() {
+        when(cardDataClient.getStatus(CARD_ID)).thenReturn(CardStatus.BLOCKED);
+        when(stateMachine.fire(eq(CARD_ID), eq(CardLifecycleState.BLOCKED), eq(CardLifecycleEvent.UNBLOCK), any()))
+                .thenReturn(CardLifecycleState.ACTIVE);
+
+        StateTransition result = unblockService.execute(new UnblockCardCommand(CARD_ID, "Recuperada", "operador"));
+
+        verify(cardDataClient).unblock(CARD_ID, "Recuperada", "operador");
+        assertThat(result.getFromState()).isEqualTo("BLOCKED");
+        assertThat(result.getToState()).isEqualTo("ACTIVE");
+        assertThat(result.getEvent()).isEqualTo("UNBLOCK");
+        verify(transitionRepository, never()).save(any());
+    }
+
+    @Test
+    void fraudUnblockIsRecordedWithoutCallingCardData() {
+        when(cardDataClient.getStatus(CARD_ID)).thenReturn(CardStatus.BLOCKED_FRAUD);
+        when(stateMachine.fire(any(), any(), any(), any()))
+                .thenThrow(new InvalidStateTransitionException("no se puede desbloquear"));
+
+        assertThatThrownBy(() -> unblockService.execute(new UnblockCardCommand(CARD_ID, "x", "u")))
+                .isInstanceOf(InvalidStateTransitionException.class);
+
+        verify(cardDataClient, never()).unblock(any(), any(), any());
+        StateTransition failed = captured();
+        assertThat(failed.isFailed()).isTrue();
+        assertThat(failed.getFromState()).isEqualTo("BLOCKED_FRAUD");
+        assertThat(failed.getToState()).isEqualTo("ACTIVE");
     }
 
     @Test
