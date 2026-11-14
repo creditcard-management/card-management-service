@@ -1,0 +1,2925 @@
+{
+  "info": {
+    "_postman_id": "2bb48592-f372-41e9-bcf1-d88439615e29",
+    "name": "Card Management System",
+    "description": "Colección de los 4 microservicios: card-data (8081), card-limits (8082), card-lifecycle (8083) y payment-processing (8085).\n\nLa carpeta 0 es un flujo de punta a punta para el Collection Runner; las carpetas 1 a 4 tienen el resto de los endpoints de cada servicio y reusan las variables que deja el flujo. La API no tiene autenticación.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Flujo punta a punta",
+      "description": "Correr la carpeta completa con el Collection Runner, en orden. Cada request valida el código HTTP y guarda en variables de la colección los ids que usan los siguientes (card_id, credit_limit_id, tx_*).\n\nRecorrido: alta → aprobación → límite de crédito → emisión → activación → compras, devolución, reverso, preautorización/captura y liquidación → pago del resumen → bloqueo, desbloqueo, bloqueo por fraude (no se puede desbloquear) → cancelación → historial.\n\nRequiere los 4 servicios levantados (8081, 8082, 8083, 8085) y Kafka: el historial de card-lifecycle y la lectura de `cards` en card-limits dependen de los eventos.\n\nLos pagos necesitan el comercio MERCH-001 y las terminales POS-0001 / ATM-0001 activos en la base: cargarlos con docs/postman/dev-seed-merchants.sql.",
+      "item": [
+        {
+          "name": "01 Alta de tarjeta (card-data)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{client_id}}\",\n  \"firstName\": \"Juan\",\n  \"lastName\": \"Pérez\",\n  \"documentNumber\": \"12345678\",\n  \"email\": \"juan.perez@email.com\",\n  \"phoneNumber\": \"+5491123456789\",\n  \"birthDate\": \"1990-05-15\",\n  \"address\": \"Av. Corrientes 1234, CABA\",\n  \"type\": \"VISA\",\n  \"category\": \"GOLD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cliente nuevo en cada corrida (ClientId: 7 a 11 dígitos)",
+                  "pm.collectionVariables.set('client_id', String(Math.floor(10000000 + Math.random() * 89999999)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('card_id', pm.response.json().id);",
+                  "pm.test('Queda REQUESTED', () => pm.expect(pm.response.json().status).to.eql('REQUESTED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 Aprobar (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/approve",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "approve"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Cliente cumple con los requisitos crediticios\",\n  \"approvedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 Asignar límite de crédito (card-limits)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/cards/{{card_id}}",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "cards",
+                "{{card_id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"purchaseLimitAmount\": 150000.0,\n  \"currency\": \"ARS\",\n  \"cashAdvancePercentage\": 0.3,\n  \"dailyLimitAmount\": 100000.0,\n  \"monthlyLimitAmount\": 150000.0,\n  \"assignedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Solo se puede asignar con la tarjeta APPROVED o ISSUED. El cardId del body tiene que coincidir con el de la URL."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('credit_limit_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 Emitir (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/issue",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "issue"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardNumber\": \"{{pan}}\",\n  \"cvv\": \"{{cvv}}\",\n  \"pin\": \"{{pin}}\",\n  \"expirationMonth\": {{expiration_month}},\n  \"expirationYear\": {{expiration_year}},\n  \"reason\": \"Emisión estándar de tarjeta física\",\n  \"issuedBy\": \"system@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "El pre-request genera un PAN Visa válido (Luhn) y lo guarda en pan / last_four."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PAN Visa aleatorio que pasa Luhn, para poder correr el flujo más de una vez",
+                  "function luhnDigit(payload) {",
+                  "  let sum = 0;",
+                  "  for (let i = 0; i < payload.length; i++) {",
+                  "    let d = Number(payload[payload.length - 1 - i]);",
+                  "    if (i % 2 === 0) { d *= 2; if (d > 9) d -= 9; }",
+                  "    sum += d;",
+                  "  }",
+                  "  return (10 - (sum % 10)) % 10;",
+                  "}",
+                  "let pan = '453201';",
+                  "while (pan.length < 15) pan += Math.floor(Math.random() * 10);",
+                  "pan += luhnDigit(pan);",
+                  "pm.collectionVariables.set('pan', pan);",
+                  "pm.collectionVariables.set('last_four', pan.slice(-4));",
+                  "pm.collectionVariables.set('expiration_year', String(new Date().getFullYear() + 3));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 Activar (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/activate",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "activate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\",\n  \"reason\": \"Activación desde app móvil\",\n  \"activatedBy\": \"juan.perez@email.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Valida el PIN contra card-data antes de activar."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 Ver tarjeta (card-data)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Queda ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 Info de crédito (card-limits)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/card/{{card_id}}/info",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "card",
+                "{{card_id}}",
+                "info"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08 Validar compra sin consumir (card-limits)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/validate/purchase",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "validate",
+                "purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"amount\": 1500.0,\n  \"currency\": \"ARS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "09 Compra con chip (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/purchase",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"cardholderName\": \"JUAN PEREZ\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 1500.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"merchantName\": \"Supermercado Centro\",\n  \"merchantCategoryCode\": \"5411\",\n  \"merchantCity\": \"CABA\",\n  \"merchantCountry\": \"AR\",\n  \"paymentMethod\": \"CHIP\",\n  \"terminalId\": \"POS-0001\",\n  \"posEntryMode\": \"051\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tx_purchase_id', pm.response.json().transactionId);",
+                  "pm.test('Aprobada', () => pm.expect(pm.response.json().approved).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10 Compra online con CVV (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/purchase",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"cardholderName\": \"JUAN PEREZ\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 2500.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"merchantName\": \"Tienda Online\",\n  \"merchantCategoryCode\": \"5411\",\n  \"merchantCity\": \"CABA\",\n  \"merchantCountry\": \"AR\",\n  \"paymentMethod\": \"ONLINE\",\n  \"terminalId\": \"POS-0001\",\n  \"cvv\": \"{{cvv}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "ONLINE y MANUAL exigen CVV; se verifica contra card-data."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tx_online_id', pm.response.json().transactionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11 Devolución parcial de la compra con chip (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/refunds/partial",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "refunds",
+                "partial"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalTransactionId\": \"{{tx_purchase_id}}\",\n  \"cardId\": \"{{card_id}}\",\n  \"refundAmount\": 500.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"reason\": \"Producto devuelto\",\n  \"initiatedBy\": \"MERCH-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12 Reverso de la compra online (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/reversals",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reversals"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{tx_online_id}}\",\n  \"reason\": \"Cliente desconoce la compra\",\n  \"reversalType\": \"CUSTOMER_REQUEST\",\n  \"initiatedBy\": \"callcenter@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13 Preautorizar (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/pre-authorize",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "pre-authorize"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"cardholderName\": \"JUAN PEREZ\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 3000.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"merchantName\": \"Hotel Centro\",\n  \"merchantCategoryCode\": \"5411\",\n  \"merchantCity\": \"CABA\",\n  \"merchantCountry\": \"AR\",\n  \"paymentMethod\": \"CHIP\",\n  \"terminalId\": \"POS-0001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tx_preauth_id', pm.response.json().transactionId);",
+                  "pm.test('Queda AUTHORIZED', () => pm.expect(pm.response.json().status).to.eql('AUTHORIZED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14 Capturar la preautorización (payment)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/{{tx_preauth_id}}/capture",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{tx_preauth_id}}",
+                "capture"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15 Liquidar en lote (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/settlements/batch",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settlements",
+                "batch"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionIds\": [\n    \"{{tx_purchase_id}}\",\n    \"{{tx_preauth_id}}\"\n  ],\n  \"initiatedBy\": \"batch\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16 Resumen de transacciones (payment)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/card/{{card_id}}/summary",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "card",
+                "{{card_id}}",
+                "summary"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17 Pago del resumen (card-limits)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/release-credit",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "release-credit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentAmount\": 1000.0,\n  \"currency\": \"ARS\",\n  \"description\": \"Pago de resumen\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18 Historial del límite (card-limits)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/history",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "history"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "19 Bloquear (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/block",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Cliente reportó la tarjeta como perdida\",\n  \"blockedBy\": \"callcenter@bank.com\",\n  \"blockType\": \"NORMAL\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "20 Desbloquear (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/unblock",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "unblock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"El cliente recuperó la tarjeta\",\n  \"unblockedBy\": \"callcenter@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "21 Bloquear por fraude (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/block",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Transacciones sospechosas detectadas\",\n  \"blockedBy\": \"antifraude@bank.com\",\n  \"blockType\": \"FRAUD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "22 Desbloquear un bloqueo por fraude → 422 (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/unblock",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "unblock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Falsa alarma\",\n  \"unblockedBy\": \"callcenter@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Esperado: un bloqueo por fraude no se revierte, la tarjeta solo puede cancelarse o vencer."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "23 Cancelar (card-lifecycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/cancel",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Fraude confirmado\",\n  \"cancelledBy\": \"antifraude@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "24 Historial de estados (card-lifecycle)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/history",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "history"
+              ]
+            },
+            "description": "Las transiciones exitosas llegan por Kafka: si corre muy rápido después de cancelar, puede faltar la última."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tiene transiciones', () => pm.expect(pm.response.json()).to.be.an('array').that.is.not.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. card-data",
+      "description": "Endpoints de card-data (8081). Los cambios de estado directos (block, unblock, cancel, PUT status) saltean la state machine de card-lifecycle; el flujo normal es por la carpeta 3.",
+      "item": [
+        {
+          "name": "Alta de tarjeta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{client_id}}\",\n  \"firstName\": \"Juan\",\n  \"lastName\": \"Pérez\",\n  \"documentNumber\": \"12345678\",\n  \"email\": \"juan.perez@email.com\",\n  \"phoneNumber\": \"+5491123456789\",\n  \"birthDate\": \"1990-05-15\",\n  \"address\": \"Av. Corrientes 1234, CABA\",\n  \"type\": \"VISA\",\n  \"category\": \"GOLD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cliente nuevo en cada corrida (ClientId: 7 a 11 dígitos)",
+                  "pm.collectionVariables.set('client_id', String(Math.floor(10000000 + Math.random() * 89999999)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('card_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver tarjeta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Tarjetas de un cliente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/client/{{client_id}}",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "client",
+                "{{client_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Buscar por últimos 4 dígitos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/search?lastFourDigits={{last_four}}&clientId={{client_id}}",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "lastFourDigits",
+                  "value": "{{last_four}}"
+                },
+                {
+                  "key": "clientId",
+                  "value": "{{client_id}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validar CVV",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/validate-cvv",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "validate-cvv"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cvv\": \"{{cvv}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validar PIN (en claro, deprecado)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/validate-pin",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "validate-pin"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "El PIN en claro solo se acepta por compatibilidad con card-lifecycle. Lo normal es { pinBlock, pinKeyId }. Un PIN incorrecto cuenta un intento: al tercero se bloquea la tarjeta."
+          },
+          "response": []
+        },
+        {
+          "name": "Cambiar PIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/reset-pin",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "reset-pin"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"oldPin\": \"{{pin}}\",\n  \"newPin\": \"5678\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Ojo: después de esto el PIN de la colección ({{pin}}) deja de coincidir."
+          },
+          "response": []
+        },
+        {
+          "name": "Cambiar estado",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/status",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"APPROVED\",\n  \"reason\": \"Cambio manual\",\n  \"performedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bloquear",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/block",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Tarjeta perdida\",\n  \"performedBy\": \"callcenter@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bloquear por fraude",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/block-fraud",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "block-fraud"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Transacciones sospechosas\",\n  \"performedBy\": \"antifraude@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Desbloquear",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/unblock",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "unblock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Tarjeta recuperada\",\n  \"performedBy\": \"callcenter@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Solo desde BLOCKED. Desde BLOCKED_FRAUD responde 422."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancelar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_data_url}}/api/v1/cards/{{card_id}}/cancel",
+              "host": [
+                "{{card_data_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cards",
+                "{{card_id}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Baja solicitada por el cliente\",\n  \"performedBy\": \"cliente\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. card-limits",
+      "description": "Endpoints de card-limits (8082). Las operaciones usan credit_limit_id (lo guarda la asignación).",
+      "item": [
+        {
+          "name": "Asignar límite",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"purchaseLimitAmount\": 150000.0,\n  \"currency\": \"ARS\",\n  \"cashAdvancePercentage\": 0.3,\n  \"dailyLimitAmount\": 100000.0,\n  \"monthlyLimitAmount\": 150000.0,\n  \"assignedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Tarjeta APPROVED o ISSUED y sin límite previo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('credit_limit_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver límite por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ver límite por tarjeta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/card/{{card_id}}",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "card",
+                "{{card_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Info de crédito por tarjeta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/card/{{card_id}}/info",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "card",
+                "{{card_id}}",
+                "info"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Aumentar límite de compras",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/increase-purchase-limit",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "increase-purchase-limit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 50000.0,\n  \"currency\": \"ARS\",\n  \"reason\": \"Aumento por buen comportamiento crediticio\",\n  \"changedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "amount es la diferencia a sumar."
+          },
+          "response": []
+        },
+        {
+          "name": "Bajar límite de compras",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/decrease-purchase-limit",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "decrease-purchase-limit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 20000.0,\n  \"currency\": \"ARS\",\n  \"reason\": \"Ajuste por riesgo\",\n  \"changedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "amount es la diferencia a restar."
+          },
+          "response": []
+        },
+        {
+          "name": "Cambiar límite de adelantos",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/update-cash-advance-limit",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "update-cash-advance-limit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 30000.0,\n  \"currency\": \"ARS\",\n  \"reason\": \"Nuevo tope de adelantos\",\n  \"changedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "amount es el valor absoluto; 0 deshabilita los adelantos."
+          },
+          "response": []
+        },
+        {
+          "name": "Cambiar límites diario y mensual",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/update-temporal-limits",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "update-temporal-limits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dailyLimitAmount\": 120000.0,\n  \"monthlyLimitAmount\": 180000.0,\n  \"currency\": \"ARS\",\n  \"reason\": \"Ajuste de límites temporales\",\n  \"changedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validar compra",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/validate/purchase",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "validate",
+                "purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"amount\": 1500.0,\n  \"currency\": \"ARS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validar adelanto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/validate/cash-advance",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "validate",
+                "cash-advance"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"amount\": 1000.0,\n  \"currency\": \"ARS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consumir por compra",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/consume-purchase",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "consume-purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000.0,\n  \"currency\": \"ARS\",\n  \"description\": \"Compra de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Exige la tarjeta ACTIVE. Sin operationId, card-limits genera uno (no idempotente)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('operation_id', pm.response.json().operationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consumir por adelanto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/consume-cash-advance",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "consume-cash-advance"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000.0,\n  \"currency\": \"ARS\",\n  \"description\": \"Adelanto de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Liberar crédito (pago)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/release-credit",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "release-credit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentAmount\": 1000.0,\n  \"currency\": \"ARS\",\n  \"description\": \"Pago de resumen\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "422 si el pago supera lo consumido."
+          },
+          "response": []
+        },
+        {
+          "name": "Restaurar crédito (reverso/devolución)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/restore-credit",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "restore-credit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1500.0,\n  \"currency\": \"ARS\",\n  \"originalTransactionDate\": \"2026-11-14\",\n  \"description\": \"Reverso de prueba\",\n  \"cashAdvance\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancelar una operación",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/operations/{{operation_id}}/cancel",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "operations",
+                "{{operation_id}}",
+                "cancel"
+              ]
+            },
+            "description": "Deshace exactamente un consumo, restauración o liberación. outcome: CANCELLED, VOIDED o ALREADY_CANCELLED."
+          },
+          "response": []
+        },
+        {
+          "name": "Historial del límite",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_limits_url}}/api/v1/credit-limits/{{credit_limit_id}}/history",
+              "host": [
+                "{{card_limits_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "credit-limits",
+                "{{credit_limit_id}}",
+                "history"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. card-lifecycle",
+      "description": "Transiciones de estado (8083), validadas por la state machine y registradas en el historial.",
+      "item": [
+        {
+          "name": "Aprobar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/approve",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "approve"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Cliente cumple con los requisitos crediticios\",\n  \"approvedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Rechazar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/reject",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "reject"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"No cumple los requisitos mínimos de ingresos\",\n  \"rejectedBy\": \"admin@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Alternativa a Aprobar: desde REQUESTED."
+          },
+          "response": []
+        },
+        {
+          "name": "Emitir",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/issue",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "issue"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardNumber\": \"{{pan}}\",\n  \"cvv\": \"{{cvv}}\",\n  \"pin\": \"{{pin}}\",\n  \"expirationMonth\": {{expiration_month}},\n  \"expirationYear\": {{expiration_year}},\n  \"reason\": \"Emisión estándar de tarjeta física\",\n  \"issuedBy\": \"system@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PAN Visa aleatorio que pasa Luhn, para poder correr el flujo más de una vez",
+                  "function luhnDigit(payload) {",
+                  "  let sum = 0;",
+                  "  for (let i = 0; i < payload.length; i++) {",
+                  "    let d = Number(payload[payload.length - 1 - i]);",
+                  "    if (i % 2 === 0) { d *= 2; if (d > 9) d -= 9; }",
+                  "    sum += d;",
+                  "  }",
+                  "  return (10 - (sum % 10)) % 10;",
+                  "}",
+                  "let pan = '453201';",
+                  "while (pan.length < 15) pan += Math.floor(Math.random() * 10);",
+                  "pan += luhnDigit(pan);",
+                  "pm.collectionVariables.set('pan', pan);",
+                  "pm.collectionVariables.set('last_four', pan.slice(-4));",
+                  "pm.collectionVariables.set('expiration_year', String(new Date().getFullYear() + 3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Activar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/activate",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "activate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\",\n  \"reason\": \"Activación desde app móvil\",\n  \"activatedBy\": \"juan.perez@email.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bloquear",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/block",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Tarjeta perdida\",\n  \"blockedBy\": \"callcenter@bank.com\",\n  \"blockType\": \"NORMAL\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bloquear por fraude",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/block",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Transacciones sospechosas\",\n  \"blockedBy\": \"antifraude@bank.com\",\n  \"blockType\": \"FRAUD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Desbloquear",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/unblock",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "unblock"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"El cliente recuperó la tarjeta\",\n  \"unblockedBy\": \"callcenter@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Solo desde BLOCKED. Desde BLOCKED_FRAUD responde 422."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancelar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/cancel",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Cliente solicitó la baja\",\n  \"cancelledBy\": \"juan.perez@email.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Historial",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{card_lifecycle_url}}/api/v1/card-lifecycle/{{card_id}}/history",
+              "host": [
+                "{{card_lifecycle_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "card-lifecycle",
+                "{{card_id}}",
+                "history"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. payment-processing",
+      "description": "Pagos, devoluciones, reversos, liquidaciones y consultas (8085). La tarjeta tiene que estar ACTIVE y con límite asignado.",
+      "item": [
+        {
+          "name": "Compra",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/purchase",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"cardholderName\": \"JUAN PEREZ\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 1500.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"merchantName\": \"Supermercado Centro\",\n  \"merchantCategoryCode\": \"5411\",\n  \"merchantCity\": \"CABA\",\n  \"merchantCountry\": \"AR\",\n  \"paymentMethod\": \"CHIP\",\n  \"terminalId\": \"POS-0001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "201 si se aprueba, 402 si se rechaza. Monto máximo 50.000."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tx_purchase_id', pm.response.json().transactionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Adelanto en efectivo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/cash-advance",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "cash-advance"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 1000.0,\n  \"currency\": \"ARS\",\n  \"terminalId\": \"ATM-0001\",\n  \"atmLocation\": \"Av. Corrientes 1234, CABA\",\n  \"country\": \"AR\",\n  \"pinBlock\": \"{{pin_block}}\",\n  \"pinKeyId\": \"{{pin_key_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Necesita un PIN block ISO 9564 formato 4 (32 hex) cifrado con la PEK que comparte con card-data, y el id de esa clave. Completar pin_block y pin_key_id antes de correrlo. Monto máximo 5.000."
+          },
+          "response": []
+        },
+        {
+          "name": "Preautorizar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/pre-authorize",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "pre-authorize"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"cardholderName\": \"JUAN PEREZ\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 3000.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"merchantName\": \"Supermercado Centro\",\n  \"merchantCategoryCode\": \"5411\",\n  \"merchantCity\": \"CABA\",\n  \"merchantCountry\": \"AR\",\n  \"paymentMethod\": \"CHIP\",\n  \"terminalId\": \"POS-0001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tx_preauth_id', pm.response.json().transactionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capturar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/{{tx_preauth_id}}/capture",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{tx_preauth_id}}",
+                "capture"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Devolución total",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/refunds/full",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "refunds",
+                "full"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalTransactionId\": \"{{tx_purchase_id}}\",\n  \"cardId\": \"{{card_id}}\",\n  \"refundAmount\": 1500.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"reason\": \"Compra anulada\",\n  \"initiatedBy\": \"MERCH-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "refundAmount tiene que ser exactamente lo que falta devolver."
+          },
+          "response": []
+        },
+        {
+          "name": "Devolución parcial",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/refunds/partial",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "refunds",
+                "partial"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalTransactionId\": \"{{tx_purchase_id}}\",\n  \"cardId\": \"{{card_id}}\",\n  \"refundAmount\": 500.0,\n  \"currency\": \"ARS\",\n  \"merchantId\": \"MERCH-001\",\n  \"reason\": \"Producto devuelto\",\n  \"initiatedBy\": \"MERCH-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reversar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/reversals",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reversals"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{tx_purchase_id}}\",\n  \"reason\": \"Cliente desconoce la compra\",\n  \"reversalType\": \"CUSTOMER_REQUEST\",\n  \"initiatedBy\": \"callcenter@bank.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "reversalType: ERROR, TIMEOUT, FRAUD o CUSTOMER_REQUEST. Solo débitos AUTHORIZED o APPROVED."
+          },
+          "response": []
+        },
+        {
+          "name": "Reverso automático",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/reversals/{{tx_purchase_id}}/auto",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reversals",
+                "{{tx_purchase_id}}",
+                "auto"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Liquidar una transacción",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/settlements/transaction/{{tx_purchase_id}}",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settlements",
+                "transaction",
+                "{{tx_purchase_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Liquidar en lote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/settlements/batch",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settlements",
+                "batch"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionIds\": [\n    \"{{tx_purchase_id}}\"\n  ],\n  \"initiatedBy\": \"batch\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Liquidar todo lo pendiente",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/settlements/all-pending",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "settlements",
+                "all-pending"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ver transacción",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/{{tx_purchase_id}}",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "{{tx_purchase_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Transacciones de la tarjeta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/card/{{card_id}}",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "card",
+                "{{card_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Transacciones por estado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/card/{{card_id}}/status/APPROVED",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "card",
+                "{{card_id}}",
+                "status",
+                "APPROVED"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Transacciones por rango",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/card/{{card_id}}/range?fromDate=2026-01-01T00:00:00&toDate=2026-12-31T23:59:59",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "card",
+                "{{card_id}}",
+                "range"
+              ],
+              "query": [
+                {
+                  "key": "fromDate",
+                  "value": "2026-01-01T00:00:00"
+                },
+                {
+                  "key": "toDate",
+                  "value": "2026-12-31T23:59:59"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resumen de la tarjeta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/card/{{card_id}}/summary",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "card",
+                "{{card_id}}",
+                "summary"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Pendientes de liquidación",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/pending-settlement",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "pending-settlement"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "card_data_url",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "card_limits_url",
+      "value": "http://localhost:8082"
+    },
+    {
+      "key": "card_lifecycle_url",
+      "value": "http://localhost:8083"
+    },
+    {
+      "key": "payment_url",
+      "value": "http://localhost:8085"
+    },
+    {
+      "key": "client_id",
+      "value": ""
+    },
+    {
+      "key": "card_id",
+      "value": ""
+    },
+    {
+      "key": "credit_limit_id",
+      "value": ""
+    },
+    {
+      "key": "operation_id",
+      "value": ""
+    },
+    {
+      "key": "pan",
+      "value": "4532015112830366"
+    },
+    {
+      "key": "last_four",
+      "value": "0366"
+    },
+    {
+      "key": "cvv",
+      "value": "123"
+    },
+    {
+      "key": "pin",
+      "value": "4821"
+    },
+    {
+      "key": "expiration_month",
+      "value": "12"
+    },
+    {
+      "key": "expiration_year",
+      "value": "2029"
+    },
+    {
+      "key": "tx_purchase_id",
+      "value": ""
+    },
+    {
+      "key": "tx_online_id",
+      "value": ""
+    },
+    {
+      "key": "tx_preauth_id",
+      "value": ""
+    },
+    {
+      "key": "pin_block",
+      "value": ""
+    },
+    {
+      "key": "pin_key_id",
+      "value": ""
+    }
+  ]
+}
