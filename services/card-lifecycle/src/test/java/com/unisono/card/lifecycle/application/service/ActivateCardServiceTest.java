@@ -65,8 +65,9 @@ class ActivateCardServiceTest {
 
         StateTransition result = service.execute(command);
 
-        verify(cardDataClient).updateStatus(CARD_ID, "ACTIVE", "Activación vía app", "cliente@email.com");
-        verify(cardDataClient).updateActivatedAt(eq(CARD_ID), any());
+        // Una sola escritura: card-data cambia el estado y registra activated_at en la misma transacción
+        verify(cardDataClient).activate(CARD_ID, "Activación vía app", "cliente@email.com");
+        verify(cardDataClient, never()).updateStatus(any(), any(), any(), any());
         assertThat(result.isSuccessful()).isTrue();
         assertThat(result.getFromState()).isEqualTo("ISSUED");
         assertThat(result.getToState()).isEqualTo("ACTIVE");
@@ -83,8 +84,7 @@ class ActivateCardServiceTest {
                 .isInstanceOf(BusinessRuleException.class)
                 .hasMessageContaining("PIN incorrecto");
 
-        verify(cardDataClient, never()).updateStatus(any(), any(), any(), any());
-        verify(cardDataClient, never()).updateActivatedAt(any(), any());
+        verify(cardDataClient, never()).activate(any(), any(), any());
         StateTransition failed = capturedSave();
         assertThat(failed.isFailed()).isTrue();
         assertThat(failed.getFromState()).isEqualTo("ISSUED");
@@ -102,7 +102,7 @@ class ActivateCardServiceTest {
                 .isInstanceOf(InvalidStateTransitionException.class);
 
         verify(cardDataClient, never()).validatePin(any(), any());
-        verify(cardDataClient, never()).updateStatus(any(), any(), any(), any());
+        verify(cardDataClient, never()).activate(any(), any(), any());
         assertThat(capturedSave().getErrorMessage()).isEqualTo("sin límite de crédito");
     }
 
@@ -112,7 +112,7 @@ class ActivateCardServiceTest {
         when(stateMachine.fire(any(), any(), any(), any())).thenReturn(CardLifecycleState.ACTIVE);
         when(cardDataClient.validatePin(CARD_ID, PIN_OK)).thenReturn(true);
         doThrow(new BusinessRuleException("Transición no permitida")).when(cardDataClient)
-                .updateStatus(CARD_ID, "ACTIVE", "Activación vía app", "cliente@email.com");
+                .activate(CARD_ID, "Activación vía app", "cliente@email.com");
 
         assertThatThrownBy(() -> service.execute(command)).isInstanceOf(BusinessRuleException.class);
 

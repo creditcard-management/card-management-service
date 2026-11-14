@@ -19,7 +19,6 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -87,27 +86,24 @@ public class CardDataRestClient implements CardDataClient {
     }
 
     @Override
-    public void updateActivatedAt(CardId cardId, LocalDateTime activatedAt) {
-        Map<String, String> request = new HashMap<>();
-        request.put("activatedAt", activatedAt.toString());
-
-        log.info("Actualizando fecha de activación vía REST: {}", cardId.getValue());
-
-        put(cardUrl(cardId) + "/activated-at", request, "registrar fecha de activación", cardId);
-    }
-
-    @Override
-    public void updateCardData(CardId cardId, CardNumber cardNumber, CVV cvv, PIN pin, ExpirationDate expirationDate) {
-        Map<String, Object> request = new HashMap<>();
+    public void issue(CardId cardId, CardNumber cardNumber, CVV cvv, PIN pin, ExpirationDate expirationDate,
+                      String reason, String performedBy) {
+        Map<String, Object> request = new HashMap<>(transitionBody(reason, performedBy));
         request.put("cardNumber", cardNumber.getValue());
         request.put("cvv", cvv.getValue());
         request.put("pin", pin.getValue());
         request.put("expirationMonth", expirationDate.getMonth());
         request.put("expirationYear", expirationDate.getYear());
 
-        log.info("Actualizando datos de tarjeta vía REST: {}", cardId.getValue());
+        log.info("Emitiendo tarjeta vía REST: {}", cardId.getValue());
 
-        put(cardUrl(cardId) + "/card-data", request, "cargar datos de emisión", cardId);
+        post(cardUrl(cardId) + "/issue", request, "emitir", cardId);
+    }
+
+    @Override
+    public void activate(CardId cardId, String reason, String performedBy) {
+        log.info("Activando tarjeta vía REST: {}", cardId.getValue());
+        post(cardUrl(cardId) + "/activate", transitionBody(reason, performedBy), "activar", cardId);
     }
 
     @Override

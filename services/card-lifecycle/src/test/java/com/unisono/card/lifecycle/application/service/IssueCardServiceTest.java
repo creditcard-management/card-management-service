@@ -16,7 +16,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -62,16 +61,15 @@ class IssueCardServiceTest {
     }
 
     @Test
-    void loadsCardDataBeforeChangingStatus() {
+    void issuesWithASingleAtomicCallToCardData() {
         when(cardDataClient.getStatus(CARD_ID)).thenReturn(CardStatus.APPROVED);
         when(stateMachine.fire(eq(CARD_ID), eq(CardLifecycleState.APPROVED), eq(CardLifecycleEvent.ISSUE), any()))
                 .thenReturn(CardLifecycleState.ISSUED);
 
         StateTransition result = service.execute(command);
 
-        InOrder order = inOrder(cardDataClient);
-        order.verify(cardDataClient).updateCardData(CARD_ID, PAN, CVV_OK, PIN_OK, EXPIRATION);
-        order.verify(cardDataClient).updateStatus(CARD_ID, "ISSUED", "Emisión estándar", "system@bank.com");
+        verify(cardDataClient).issue(CARD_ID, PAN, CVV_OK, PIN_OK, EXPIRATION, "Emisión estándar", "system@bank.com");
+        verify(cardDataClient, never()).updateStatus(any(), any(), any(), any());
         assertThat(result.isSuccessful()).isTrue();
         assertThat(result.getFromState()).isEqualTo("APPROVED");
         assertThat(result.getToState()).isEqualTo("ISSUED");
@@ -104,40 +102,33 @@ class IssueCardServiceTest {
         assertThatThrownBy(() -> service.execute(command))
                 .isInstanceOf(InvalidStateTransitionException.class);
 
-        verify(cardDataClient, never()).updateCardData(any(), any(), any(), any(), any());
-        verify(cardDataClient, never()).updateStatus(any(), any(), any(), any());
+        verify(cardDataClient, never()).issue(any(), any(), any(), any(), any(), any(), any());
         StateTransition failed = captured();
         assertThat(failed.getFromState()).isEqualTo("REQUESTED");
         assertThat(failed.getToState()).isEqualTo("ISSUED");
     }
 
     @Test
-    void rejectedCardDataSkipsStatusChange() {
+    void cardDataRejectionIsRecorded() {
         when(cardDataClient.getStatus(CARD_ID)).thenReturn(CardStatus.APPROVED);
         when(stateMachine.fire(any(), any(), any(), any())).thenReturn(CardLifecycleState.ISSUED);
         doThrow(new ValidationException("PAN duplicado"))
-                .when(cardDataClient).updateCardData(any(), any(), any(), any(), any());
+                .when(cardDataClient).issue(any(), any(), any(), any(), any(), any(), any());
 
         assertThatThrownBy(() -> service.execute(command)).isInstanceOf(ValidationException.class);
 
-        verify(cardDataClient, never()).updateStatus(any(), any(), any(), any());
         assertThat(captured().getErrorMessage()).isEqualTo("PAN duplicado");
     }
 
-    /**
-     * Comportamiento actual (LIFECYCLE.md §9, consistencia): si falla el cambio de estado, los datos
-     * de emisión ya quedaron cargados en card-data y no se compensan.
-     */
     @Test
-    void statusFailureAfterCardDataIsRecordedWithoutCompensation() {
+    void cardDataUnavailableIsRecorded() {
         when(cardDataClient.getStatus(CARD_ID)).thenReturn(CardStatus.APPROVED);
         when(stateMachine.fire(any(), any(), any(), any())).thenReturn(CardLifecycleState.ISSUED);
         doThrow(new CardDataIntegrationException("card-data no disponible", null))
-                .when(cardDataClient).updateStatus(any(), any(), any(), any());
+                .when(cardDataClient).issue(any(), any(), any(), any(), any(), any(), any());
 
         assertThatThrownBy(() -> service.execute(command)).isInstanceOf(CardDataIntegrationException.class);
 
-        verify(cardDataClient).updateCardData(CARD_ID, PAN, CVV_OK, PIN_OK, EXPIRATION);
         StateTransition failed = captured();
         assertThat(failed.isFailed()).isTrue();
         assertThat(failed.getErrorMessage()).isEqualTo("card-data no disponible");

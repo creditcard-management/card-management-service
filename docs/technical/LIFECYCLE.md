@@ -10,7 +10,7 @@
 | Base path REST | `/api/v1/card-lifecycle` |
 | Base de datos | PostgreSQL `card_management_db` — tabla propia `state_transitions`; lee `credit_limits`. No accede a `cards` (la modifica vía `card-data`) |
 | Mensajería | Kafka: consume `card.created` (grupo `card-lifecycle-consumer-group`) y los ocho eventos de cambio de estado para el historial (grupo `card-lifecycle-consumer-group-history`) y publica en `dlq.card-events` los mensajes que no puede procesar, que después reprocesa solo (`DeadLetterRedriver`) |
-| Integración síncrona | REST hacia `card-data` (`card-data.base-url`, por defecto `http://localhost:8081`): lectura de estado, cambios de estado, datos de emisión, validación de PIN, bloqueo y cancelación |
+| Integración síncrona | REST hacia `card-data` (`card-data.base-url`, por defecto `http://localhost:8081`; timeouts de 2 s de conexión y 5 s de lectura): lectura de estado, cambios de estado, emisión y activación atómicas, validación de PIN, bloqueo, desbloqueo y cancelación |
 | Dependencias internas | `card-shared` (Value Objects, `CardStatus`, excepciones), `card-events` (eventos y topics) |
 | Librerías destacadas | Spring State Machine (`spring-statemachine-core`, `-data-jpa`) |
 | Swagger UI | `http://localhost:8083/swagger-ui.html` |
@@ -26,7 +26,7 @@ flowchart LR
     CD[card-data :8081] -->|card.created| K[(Kafka)]
     K -->|CardEventConsumer| CL[card-lifecycle :8083]
     Op[Operador / Backoffice] -->|REST /api/v1/card-lifecycle| CL
-    CL -->|GET /cards/id · PUT /status, /activated-at, /card-data<br/>POST /validate-pin, /block, /block-fraud, /unblock, /cancel| CD
+    CL -->|GET /cards/id · PUT /status<br/>POST /issue, /validate-pin, /activate, /block, /block-fraud, /unblock, /cancel| CD
     CL -->|JPA lectura credit_limits| DB[(PostgreSQL)]
     CL -->|JPA state_transitions| DB
 ```
@@ -76,8 +76,8 @@ Todas las transiciones modifican la tarjeta **solo a través de `card-data`**; e
 |---|---|---|
 | Aprobar | `ApproveCardService` | `PUT /status` (`APPROVED`) |
 | Rechazar | `RejectCardService` | `PUT /status` (`REJECTED`) |
-| Emitir | `IssueCardService` | `PUT /card-data` + `PUT /status` (`ISSUED`) |
-| Activar | `ActivateCardService` | `POST /validate-pin` + `PUT /status` (`ACTIVE`) + `PUT /activated-at` |
+| Emitir | `IssueCardService` | `POST /issue` (datos de emisión + `ISSUED` en una transacción) |
+| Activar | `ActivateCardService` | `POST /validate-pin` + `POST /activate` (`ACTIVE` + `activated_at` en una transacción) |
 | Bloquear / Bloquear por fraude | `BlockCardService` | `POST /block` / `POST /block-fraud` (completan `block_reason`, `blocked_at`) |
 | Desbloquear | `UnblockCardService` | `POST /unblock` (vuelve a `ACTIVE` y limpia `block_reason`, `blocked_at` e intentos de PIN) |
 | Cancelar | `CancelCardService` | `POST /cancel` (completa `cancelled_reason`, `cancelled_at`) |
@@ -86,7 +86,7 @@ Todos delegan en `LifecycleTransitionExecutor`, que aplica siempre la misma secu
 
 1. Lee el estado real de la tarjeta en `card-data` (`GET /api/v1/cards/{id}`).
 2. Dispara el evento en la state machine posicionada en ese estado (§2.2). Si no hay transición o un guard la rechaza, lanza `InvalidStateTransitionException` y **no se llama a `card-data`**.
-3. Ejecuta los efectos en `card-data` (cambio de estado, datos de emisión, PIN, fecha de activación).
+3. Ejecuta los efectos en `card-data`. Cada transición hace **una sola escritura**, atómica en card-data: la emisión carga los datos y cambia el estado en `POST /issue`, y la activación cambia el estado y registra la fecha en `POST /activate`. La única llamada previa es `validate-pin`, que no cambia el estado. Así una falla no deja la tarjeta a medio actualizar.
 4. Devuelve la transición aplicada (`fromState` real y destino de la máquina) **sin guardarla**. card-data publica el evento del cambio y `CardStatusEventConsumer` la registra (§5.5), así cada cambio queda una sola vez en el historial. La respuesta del endpoint no trae `id` (es `null`), y el historial muestra el cambio unos milisegundos después.
 
 Si falla cualquier paso con una excepción de dominio, registra una transición fallida (`successful = false`, `to_state` = destino buscado, `error_message` = motivo) y relanza la excepción. Si la tarjeta no existe (404) no se registra nada, porque `state_transitions.card_id` tiene FK a `cards`. Los servicios **no son transaccionales**: cada guardado en `state_transitions` se confirma por separado, así que el registro del fallo no se revierte. Si el guardado del fallo también falla, se loguea y se propaga el error original.
@@ -241,7 +241,7 @@ Lee el estado en `card-data`, valida `REJECT` con la state machine (solo desde `
 | `expirationYear` | ≥ 2025 |
 | `reason`, `issuedBy` | Obligatorios |
 
-Flujo: lee el estado en `card-data` → valida `ISSUE` con la state machine (`IssuanceGuard`) → `PUT /card-data` (PAN, CVV, PIN en claro, vencimiento — `card-data` cifra y hashea) → `PUT /status` con `ISSUED` → registra la transición. Respuesta **200** `CardLifecycleResponse` con `status: ISSUED`.
+Flujo: lee el estado en `card-data` → valida `ISSUE` con la state machine (`IssuanceGuard`) → `POST /issue` con PAN, CVV, PIN en claro, vencimiento, `reason` y `performedBy`. card-data cifra y hashea, carga los datos y pasa a `ISSUED` en una sola transacción: si algo falla no queda nada cargado. La transición llega por `card.issued`. Respuesta **200** `CardLifecycleResponse` con `status: ISSUED`.
 
 ### 4.4 `POST /{cardId}/activate` — Activar
 
@@ -253,7 +253,7 @@ Los tres campos son obligatorios (`pin` de 4 dígitos). Flujo:
 
 1. Lee el estado en `card-data` y valida `ACTIVATE` con la state machine: la tarjeta debe estar `ISSUED` y tener límite de crédito (`ActivationGuard`). Si falla → **422**.
 2. Verifica el PIN con `card-data` `POST /cards/{id}/validate-pin`. Si es incorrecto → **422** `PIN incorrecto: no se puede activar la tarjeta …`. El PIN se verifica **después** de la state machine para no consumir intentos en una activación que igual sería rechazada; cada PIN incorrecto suma un intento en `card-data`, que bloquea la tarjeta al llegar al máximo ([DATA.md](DATA.md)).
-3. `PUT /status` con `ACTIVE` → `PUT /activated-at` con la hora actual. La transición llega por `card.activated`.
+3. `POST /activate`: card-data pasa a `ACTIVE` y registra `activated_at` en una sola transacción. La transición llega por `card.activated`.
 
 Respuesta **200** `CardLifecycleResponse` con `status: ACTIVE`.
 
@@ -358,27 +358,25 @@ sequenceDiagram
     CL->>CD: GET /cards/{id} (estado actual)
     CL->>CL: state machine APPROVE [ApprovalGuard]
     CL->>CD: PUT /cards/{id}/status {APPROVED}
-    CL->>DB: REQUESTED → APPROVED
+    CD-->>DB: card.approved → REQUESTED → APPROVED
 
     Op->>CL: POST /{id}/issue
     CL->>CD: GET /cards/{id}
     CL->>CL: state machine ISSUE [IssuanceGuard]
-    CL->>CD: PUT /cards/{id}/card-data {PAN, CVV, PIN, exp}
-    CL->>CD: PUT /cards/{id}/status {ISSUED}
-    CL->>DB: APPROVED → ISSUED
+    CL->>CD: POST /cards/{id}/issue {PAN, CVV, PIN, exp, reason}
+    CD-->>DB: card.issued → APPROVED → ISSUED
 
     Op->>CL: POST /{id}/activate
     CL->>CD: GET /cards/{id}
     CL->>CL: state machine ACTIVATE [ActivationGuard: límite de crédito]
     CL->>CD: POST /cards/{id}/validate-pin
-    CL->>CD: PUT /cards/{id}/status {ACTIVE}
-    CL->>CD: PUT /cards/{id}/activated-at {now}
-    CL->>DB: ISSUED → ACTIVE
+    CL->>CD: POST /cards/{id}/activate {reason}
+    CD-->>DB: card.activated → ISSUED → ACTIVE
 
-    Note over CL,DB: Si cualquier paso falla: transición fallida<br/>(successful = false) y error 4xx/502 al cliente
+    Note over CL,DB: Las exitosas las registra CardStatusEventConsumer (§5.5).<br/>Si un paso falla: transición fallida (successful = false) y 4xx/502
 ```
 
-Las llamadas a `card-data` son síncronas con `RestTemplate` (sin timeouts ni reintentos configurados). La transición exitosa se registra **después** de que `card-data` respondió OK, con el `fromState` leído de `card-data`. `card-data` vuelve a validar la transición al recibir `PUT /status` (422 si no está permitida, [DATA.md §3.5](DATA.md)); ese rechazo también queda registrado como transición fallida.
+Las llamadas a `card-data` son síncronas con `RestTemplate`, con timeouts de conexión y lectura (§8.1) y **sin reintentos**: las escrituras no son idempotentes y `validate-pin` consume intentos. Un timeout responde 502. La transición exitosa no la guarda este flujo: llega por el evento que card-data publica en la misma transacción del cambio (§5.5). `card-data` vuelve a validar la transición (422 si no está permitida, [DATA.md §3.5](DATA.md)); ese rechazo queda registrado como transición fallida.
 
 ### 5.3 Rechazo, bloqueo, desbloqueo y cancelación
 
@@ -393,7 +391,7 @@ sequenceDiagram
     CL->>CD: GET /cards/{id} (estado actual)
     CL->>CL: state machine REJECT | BLOCK / BLOCK_FRAUD [BlockGuard] | UNBLOCK | CANCEL
     CL->>CD: PUT /status {REJECTED} | POST /block, /block-fraud | POST /unblock | POST /cancel
-    CL->>DB: transición exitosa (fromState real)
+    CD-->>DB: card.rejected / card.blocked / card.unblocked / card.cancelled → transición exitosa
     Note over CL,DB: Si falla: transición fallida y error 4xx/502
 ```
 
@@ -461,7 +459,7 @@ Consultas (`JpaStateTransitionRepository`): por tarjeta (desc), solo exitosas, s
 
 ## 7. Seguridad de datos sensibles
 
-- En el camino REST (emisión), el PAN, el CVV y el PIN viajan **en claro** en el body hacia `card-data`, que los cifra (AES-GCM) y hashea (BCrypt). La activación también manda el PIN en claro a `validate-pin` (`pin`); los adelantos de payment-processing, en cambio, ya mandan un PIN block cifrado ([DATA.md §4.3](DATA.md)). No hay TLS ni autenticación entre servicios.
+- En el camino REST (emisión, `POST /issue`), el PAN, el CVV y el PIN viajan **en claro** en el body hacia `card-data`, que los cifra (AES-GCM) y hashea (BCrypt). La activación también manda el PIN en claro a `validate-pin` (`pin`); los adelantos de payment-processing, en cambio, ya mandan un PIN block cifrado ([DATA.md §4.3](DATA.md)). No hay TLS ni autenticación entre servicios.
 - El módulo no lee ni escribe PAN, CVV ni PIN en la base: el cifrado y el hash son responsabilidad exclusiva de `card-data`.
 - `Card.getLastFourDigits()` se usa para logs seguros.
 - La API no tiene autenticación ni autorización: `approvedBy`, `blockedBy`, etc. son texto libre que envía el cliente.
@@ -482,6 +480,7 @@ Consultas (`JpaStateTransitionRepository`): por tarjeta (desc), solo exitosas, s
 | `spring.kafka.consumer.group-id` | `card-lifecycle-consumer-group` |
 | `spring.kafka.listener.ack-mode` | `manual` |
 | `card-data.base-url` | `http://localhost:8081` (default en `CardDataRestClient`) |
+| `card-data.connect-timeout-ms` / `read-timeout-ms` | `2000` / `5000` (`RestClientConfig`). Sin reintentos |
 | `card-lifecycle.kafka.retry.max-retries` | `4` (reintentos antes de enviar a la DLQ) |
 | `card-lifecycle.kafka.retry.initial-interval-ms` | `1000` (se duplica en cada reintento) |
 | `card-lifecycle.kafka.history.auto-offset-reset` | `latest` (primer arranque del grupo del historial: no reprocesa eventos viejos, ver §5.5) |
@@ -510,6 +509,7 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-lifecycle-service
 
 ## 9. Limitaciones conocidas y deuda técnica
 
-Comportamientos actuales del código que conviene resolver:
+Comportamientos actuales del código que conviene tener presentes:
 
-1. **Consistencia entre servicios.** Emisión y activación hacen varias llamadas REST de escritura seguidas: si la segunda falla, `card-data` queda a medio actualizar y no hay compensación. Si falla el guardado de la transición después de las llamadas, el cambio en `card-data` ya está hecho y no queda historial. `RestTemplate` no tiene timeouts.
+1. **Resultado incierto ante un timeout.** Si card-data aplica una escritura pero la respuesta no llega a tiempo, card-lifecycle responde 502 y registra una transición fallida, y después el evento de card-data registra la exitosa. El estado real queda bien; el historial muestra las dos filas.
+2. **La activación hace dos llamadas.** `validate-pin` y `POST /activate` son llamadas separadas, porque un PIN incorrecto tiene que sumar el intento aunque la activación no siga. Si `POST /activate` falla, el PIN ya quedó validado, y eso no cambia el estado de la tarjeta.

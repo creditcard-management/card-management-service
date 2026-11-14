@@ -31,6 +31,12 @@ spring:
     consumer:
       group-id: card-lifecycle-consumer-group
 
+# Cliente REST hacia card-data (la URL se toma de card-data.base-url, por defecto http://localhost:8081).
+# Sin reintentos a propósito: las escrituras no son idempotentes y validate-pin consume intentos
+card-data:
+  connect-timeout-ms: 2000
+  read-timeout-ms: 5000
+
 # Reintentos del consumidor antes de enviar un mensaje a dlq.card-events (1 s, 2 s, 4 s, 8 s)
 card-lifecycle:
   kafka:

@@ -15,13 +15,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * Plantilla común de las transiciones que se aplican vía card-data
- * (aprobar, emitir, activar):
+ * Plantilla común de todas las transiciones que se aplican vía card-data
+ * (aprobar, rechazar, emitir, activar, bloquear, desbloquear, cancelar):
  *
  * <ol>
  *   <li>lee el estado real de la tarjeta en card-data;</li>
  *   <li>dispara el evento en la state machine (transición + guards);</li>
- *   <li>ejecuta los efectos en card-data;</li>
+ *   <li>ejecuta los efectos en card-data (una escritura atómica por transición);</li>
  *   <li>devuelve la transición aplicada, con el estado origen real.</li>
  * </ol>
  *

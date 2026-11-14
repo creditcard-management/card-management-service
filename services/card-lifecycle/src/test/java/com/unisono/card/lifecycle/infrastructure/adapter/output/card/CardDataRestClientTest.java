@@ -3,7 +3,10 @@ package com.unisono.card.lifecycle.infrastructure.adapter.output.card;
 import com.unisono.card.lifecycle.domain.exception.CardDataIntegrationException;
 import com.unisono.card.shared.domain.exception.BusinessRuleException;
 import com.unisono.card.shared.domain.exception.NotFoundException;
+import com.unisono.card.shared.domain.valueobject.CVV;
 import com.unisono.card.shared.domain.valueobject.CardId;
+import com.unisono.card.shared.domain.valueobject.CardNumber;
+import com.unisono.card.shared.domain.valueobject.ExpirationDate;
 import com.unisono.card.shared.domain.valueobject.CardStatus;
 import com.unisono.card.shared.domain.valueobject.PIN;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,9 +69,9 @@ class CardDataRestClientTest {
 
     @Test
     void translates5xxToIntegrationError() {
-        server.expect(requestTo(CARD_URL + "/activated-at")).andRespond(withServerError());
+        server.expect(requestTo(CARD_URL + "/activate")).andRespond(withServerError());
 
-        assertThatThrownBy(() -> client.updateActivatedAt(CARD_ID, java.time.LocalDateTime.now()))
+        assertThatThrownBy(() -> client.activate(CARD_ID, "App", "cliente"))
                 .isInstanceOf(CardDataIntegrationException.class);
     }
 
@@ -105,6 +108,36 @@ class CardDataRestClientTest {
         client.blockForFraud(CARD_ID, "Fraude", "antifraude");
         client.unblock(CARD_ID, "Recuperada", "operador");
         client.cancel(CARD_ID, "Baja", "cliente");
+
+        server.verify();
+    }
+
+    @Test
+    void issuesWithCardDataReasonAndAuthorInOneCall() {
+        server.expect(requestTo(CARD_URL + "/issue")).andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.cardNumber").value("4532015112830366"))
+                .andExpect(jsonPath("$.cvv").value("123"))
+                .andExpect(jsonPath("$.pin").value("4821"))
+                .andExpect(jsonPath("$.expirationMonth").value(12))
+                .andExpect(jsonPath("$.expirationYear").value(2030))
+                .andExpect(jsonPath("$.reason").value("Emisión"))
+                .andExpect(jsonPath("$.performedBy").value("emisor"))
+                .andRespond(withSuccess("{\"status\":\"ISSUED\"}", MediaType.APPLICATION_JSON));
+
+        client.issue(CARD_ID, CardNumber.of("4532015112830366"), CVV.of("123"), PIN.of("4821"),
+                ExpirationDate.of(12, 2030), "Emisión", "emisor");
+
+        server.verify();
+    }
+
+    @Test
+    void activatesWithReasonAndAuthor() {
+        server.expect(requestTo(CARD_URL + "/activate")).andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.reason").value("App"))
+                .andExpect(jsonPath("$.performedBy").value("cliente"))
+                .andRespond(withSuccess());
+
+        client.activate(CARD_ID, "App", "cliente");
 
         server.verify();
     }

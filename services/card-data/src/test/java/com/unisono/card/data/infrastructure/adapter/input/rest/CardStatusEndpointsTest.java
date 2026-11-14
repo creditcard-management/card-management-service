@@ -177,6 +177,117 @@ class CardStatusEndpointsTest {
         putJson("/activated-at", "{\"activatedAt\":\"no-es-fecha\"}").andExpect(status().isBadRequest());
     }
 
+    // ========== POST /issue (emisión atómica) ==========
+
+    @Test
+    void shouldIssueLoadingDataAndStatusTogether() throws Exception {
+        approve();
+
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ISSUED"));
+
+        Card card = storedCard();
+        assertThat(card.getStatus()).isEqualTo(CardStatus.ISSUED);
+        assertThat(card.getCardNumber().getLastFourDigits()).isEqualTo("0366");
+        assertThat(card.getIssuedAt()).isNotNull();
+
+        assertThat(outbox).extracting(EnqueuedEvent::topic)
+                .containsExactly(KafkaTopics.CARD_APPROVED, KafkaTopics.CARD_ISSUED);
+        CardIssuedEvent issued = eventAt(1);
+        assertThat(issued.getPreviousStatus()).isEqualTo("APPROVED");
+        assertThat(issued.getLastFourDigits()).isEqualTo("0366");
+        assertThat(issued.getReason()).isEqualTo("Emisión");
+        assertThat(issued.getIssuedBy()).isEqualTo("emisor");
+    }
+
+    @Test
+    void shouldNotIssueCardThatIsNotApproved() throws Exception {
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("Business Rule Violation"));
+
+        Card card = storedCard();
+        assertThat(card.getStatus()).isEqualTo(CardStatus.REQUESTED);
+        assertThat(card.getCardNumber()).isNull();
+        assertThat(outbox).isEmpty();
+    }
+
+    @Test
+    void shouldLeaveCardUntouchedWhenIssuanceDataIsInvalid() throws Exception {
+        approve();
+
+        postJson("/issue", issueBody(LocalDate.now().getYear() - 1))
+                .andExpect(status().isBadRequest());
+
+        Card card = storedCard();
+        assertThat(card.getStatus()).isEqualTo(CardStatus.APPROVED);
+        assertThat(card.getCardNumber()).isNull();
+        assertThat(outbox).extracting(EnqueuedEvent::topic).containsExactly(KafkaTopics.CARD_APPROVED);
+    }
+
+    @Test
+    void shouldReturn400WhenIssuancePanIsMissing() throws Exception {
+        approve();
+
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2).replace("\"cardNumber\":\"4532015112830366\",", ""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.cardNumber").exists());
+    }
+
+    // ========== POST /activate (activación atómica) ==========
+
+    @Test
+    void shouldActivateRecordingActivationDate() throws Exception {
+        issue();
+
+        postJson("/activate", "{\"reason\":\"App\",\"performedBy\":\"cliente\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        Card card = storedCard();
+        assertThat(card.getStatus()).isEqualTo(CardStatus.ACTIVE);
+        assertThat(card.getActivatedAt()).isNotNull();
+
+        assertThat(outbox).extracting(EnqueuedEvent::topic).endsWith(KafkaTopics.CARD_ACTIVATED);
+        CardActivatedEvent activated = eventAt(outbox.size() - 1);
+        assertThat(activated.getPreviousStatus()).isEqualTo("ISSUED");
+        assertThat(activated.getActivatedBy()).isEqualTo("cliente");
+    }
+
+    @Test
+    void shouldNotActivateCardThatIsNotIssued() throws Exception {
+        approve();
+
+        postJson("/activate", "{}").andExpect(status().isUnprocessableEntity());
+
+        assertThat(storedCard().getStatus()).isEqualTo(CardStatus.APPROVED);
+        assertThat(storedCard().getActivatedAt()).isNull();
+    }
+
+    @Test
+    void shouldNotUseActivateToUnblock() throws Exception {
+        issue();
+        postJson("/activate", "{}").andExpect(status().isOk());
+        postJson("/block", "{\"reason\":\"Pérdida\"}").andExpect(status().isOk());
+        int events = outbox.size();
+
+        postJson("/activate", "{}").andExpect(status().isUnprocessableEntity());
+
+        assertThat(storedCard().getStatus()).isEqualTo(CardStatus.BLOCKED);
+        assertThat(outbox).hasSize(events);
+    }
+
+    @Test
+    void shouldActivateWithoutBodyUsingSystemAsAuthor() throws Exception {
+        issue();
+
+        mockMvc.perform(post("/api/v1/cards/" + cardId + "/activate")).andExpect(status().isOk());
+
+        CardActivatedEvent activated = eventAt(outbox.size() - 1);
+        assertThat(activated.getActivatedBy()).isEqualTo("system");
+    }
+
     // ========== Flujo completo y bloqueo ==========
 
     @Test
@@ -364,6 +475,18 @@ class CardStatusEndpointsTest {
     }
 
     // ========== Helpers ==========
+
+    private void issue() throws Exception {
+        approve();
+        postJson("/issue", issueBody(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
+    }
+
+    private static String issueBody(int expirationYear) {
+        return """
+                {"cardNumber":"4532015112830366","cvv":"123","pin":"4821","expirationMonth":12,
+                 "expirationYear":%d,"reason":"Emisión","performedBy":"emisor"}
+                """.formatted(expirationYear);
+    }
 
     private void approve() throws Exception {
         putJson("/status", "{\"status\":\"APPROVED\"}").andExpect(status().isOk());

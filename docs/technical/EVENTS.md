@@ -284,6 +284,8 @@ sequenceDiagram
 | Operación en card-data | Evento |
 |---|---|
 | `PUT /status` → `APPROVED` / `REJECTED` / `ISSUED` | `card.approved` / `card.rejected` / `card.issued` |
+| `POST /issue` (emisión atómica) | `card.issued` |
+| `POST /activate` (activación atómica) | `card.activated` |
 | `PUT /status` → `ACTIVE`, desde `ISSUED` | `card.activated` |
 | `PUT /status` → `ACTIVE`, desde un estado bloqueado | `card.unblocked` |
 | `PUT /status` → `BLOCKED` / `BLOCKED_FRAUD` | `card.blocked` (`NORMAL` / `FRAUD`) |
