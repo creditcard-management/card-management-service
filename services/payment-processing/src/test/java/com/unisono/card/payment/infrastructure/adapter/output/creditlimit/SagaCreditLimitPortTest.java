@@ -101,9 +101,9 @@ class SagaCreditLimitPortTest {
     void shouldNotConfirmWhenCardLimitsFails() {
         when(journal.begin(any(), any(), any(), any())).thenReturn(OPERATION_ID);
         doThrow(new ExternalServiceException("card-limits", "timeout", null))
-                .when(adapter).restoreCredit(eq(OPERATION_ID), any(), any(), any(), anyString());
+                .when(adapter).restoreCredit(eq(OPERATION_ID), any(), any(), any(), anyString(), eq(false));
 
-        assertThatThrownBy(() -> port.restoreCredit(TRANSACTION_ID, CARD_ID, AMOUNT, LocalDate.now(), "Reverso"))
+        assertThatThrownBy(() -> port.restoreCredit(TRANSACTION_ID, CARD_ID, AMOUNT, LocalDate.now(), "Reverso", false))
                 .isInstanceOf(ExternalServiceException.class);
 
         verify(journal, never()).confirm(anyString());
@@ -113,7 +113,8 @@ class SagaCreditLimitPortTest {
     @Test
     void shouldCompensateWhenThePaymentTransactionRollsBack() {
         when(journal.begin(TRANSACTION_ID, CARD_ID, Type.RESTORE, AMOUNT)).thenReturn(OPERATION_ID);
-        port.restoreCredit(TRANSACTION_ID, CARD_ID, AMOUNT, LocalDate.now(), "Reverso");
+        port.restoreCredit(TRANSACTION_ID, CARD_ID, AMOUNT, LocalDate.now(), "Reverso", true);
+        verify(adapter).restoreCredit(eq(OPERATION_ID), eq(CARD_ID), eq(AMOUNT), any(), eq("Reverso"), eq(true));
 
         complete(TransactionSynchronization.STATUS_ROLLED_BACK);
 

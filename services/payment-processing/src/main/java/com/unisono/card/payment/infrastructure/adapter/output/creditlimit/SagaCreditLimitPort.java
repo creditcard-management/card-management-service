@@ -60,9 +60,10 @@ public class SagaCreditLimitPort implements CreditLimitPort {
 
     @Override
     public void restoreCredit(TransactionId transactionId, CardId cardId, Money amount,
-                              LocalDate originalTransactionDate, String description) {
+                              LocalDate originalTransactionDate, String description, boolean cashAdvance) {
         String operationId = start(transactionId, cardId, Type.RESTORE, amount);
-        creditLimitAdapter.restoreCredit(operationId, cardId, amount, originalTransactionDate, description);
+        creditLimitAdapter.restoreCredit(operationId, cardId, amount, originalTransactionDate, description,
+                cashAdvance);
         journal.confirm(operationId);
     }
 

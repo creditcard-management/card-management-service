@@ -119,7 +119,8 @@ public class CreditLimitDtoMapper {
                 amount,
                 request.getOriginalTransactionDate(),
                 request.getDescription(),
-                blankToNull(request.getOperationId())
+                blankToNull(request.getOperationId()),
+                Boolean.TRUE.equals(request.getCashAdvance())
         );
     }
 
@@ -166,6 +167,8 @@ public class CreditLimitDtoMapper {
                 .cardId(creditLimit.getCardId().getValue())
                 .purchaseLimit(creditLimit.getPurchaseLimit().getAmount().getAmount())
                 .cashAdvanceLimit(creditLimit.getCashAdvanceLimit().getAmount().getAmount())
+                .cashAdvanceConsumed(creditLimit.getCashAdvanceConsumed().getAmount().getAmount())
+                .cashAdvanceAvailable(creditLimit.getCashAdvanceAvailable().getAmount())
                 .availableCredit(creditLimit.getAvailableCredit().getAmount().getAmount())
                 .consumedCredit(creditLimit.getConsumedCredit().getAmount().getAmount())
                 .dailyLimit(creditLimit.getDailyLimit().getAmount().getAmount())
@@ -187,6 +190,8 @@ public class CreditLimitDtoMapper {
         return CreditInfoResponse.builder()
                 .purchaseLimit(creditLimit.getPurchaseLimit().getAmount().getAmount())
                 .cashAdvanceLimit(creditLimit.getCashAdvanceLimit().getAmount().getAmount())
+                .cashAdvanceConsumed(creditLimit.getCashAdvanceConsumed().getAmount().getAmount())
+                .cashAdvanceAvailable(creditLimit.getCashAdvanceAvailable().getAmount())
                 .availableCredit(creditLimit.getAvailableCredit().getAmount().getAmount())
                 .consumedCredit(creditLimit.getConsumedCredit().getAmount().getAmount())
                 .utilizationPercentage(utilization.doubleValue())

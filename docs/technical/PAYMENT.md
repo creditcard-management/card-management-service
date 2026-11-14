@@ -228,7 +228,7 @@ Puntos clave:
 - La compra se autoriza y aprueba en un solo paso: termina en `APPROVED`, lista para liquidar. Para separar la autorización de la captura está la preautorización (§4.6).
 - El score de fraude se calcula **una sola vez** (una llamada al servicio externo). Ese valor es el que se evalúa (`isSuspicious(tx, score)`) y el que queda guardado, también en un rechazo.
 - **CVV:** en `ONLINE` y `MANUAL` es obligatorio y se verifica contra card-data (`POST /cards/{id}/validate-cvv`) después del estado de la tarjeta. Si se envía en otro método, también se verifica. Incorrecto o faltante → `DECLINED` `N7`.
-- El crédito se **consume** en card-limits al aprobar (baja el disponible y los acumulados diario y mensual), después de que el autorizador aprobó. Una transacción rechazada nunca lo consume. Un reverso o una devolución lo **restauran** con `restore-credit` (disponible y, si la original es del día o del mes en curso, el cupo diario y mensual). Liquidar no lo toca.
+- El crédito se **consume** en card-limits al aprobar (baja el disponible y los acumulados diario y mensual), después de que el autorizador aprobó. Una transacción rechazada nunca lo consume. Un reverso o una devolución lo **restauran** con `restore-credit` (disponible y, si la original es del día o del mes en curso, el cupo diario y mensual). Si la original fue un adelanto, se manda `cashAdvance: true` y card-limits también devuelve lo usado en adelantos, que son acumulativos contra su tope ([LIMITS.md §4.4](LIMITS.md)). Liquidar no lo toca.
 - Si card-data o card-limits no responden, el pago no se procesa: **503** `SERVICE_UNAVAILABLE`.
 - Los eventos se guardan en el **outbox** con la transacción y se publican después del commit. El consumo de crédito queda atado a esa misma transacción: si no confirma, se deshace en card-limits (§4.7).
 
@@ -247,7 +247,7 @@ Después sigue el mismo flujo que la compra, con `merchantName = "ATM Cash Advan
 1. Carga la transacción **con lock** (`SELECT … FOR UPDATE`, se serializa con las devoluciones) → valida que sea un débito (`PURCHASE`/`CASH_ADVANCE`) en `AUTHORIZED`/`APPROVED`. Una devolución no se puede reversar (400).
 2. Si la transacción ya tiene devoluciones, no se reversa (400): el reverso devolvería el monto completo otra vez. Lo que falta se devuelve con una devolución.
 3. Ejecuta `reverse(reason)` → `REVERSED`. Si estaba `AUTHORIZED` (preautorización), anula la autorización.
-4. Llama a card-limits `restore-credit` por el monto y con la fecha de la transacción → guarda → publica `PaymentReversed`.
+4. Llama a card-limits `restore-credit` por el monto y con la fecha de la transacción (`cashAdvance: true` si es un adelanto) → guarda → publica `PaymentReversed`.
 
 `/auto` hace lo mismo con el motivo fijo `"Automatic reversal due to timeout or system error"`.
 
@@ -261,7 +261,7 @@ Después sigue el mismo flujo que la compra, con `merchantName = "ATM Cash Advan
    - **Parcial:** menor o igual a lo que falta.
 4. Valida la tarjeta.
 5. Crea una transacción `REFUND` **vinculada a la original** (`originalTransactionId`) y la aprueba con `approveRefund()` (`PENDING → APPROVED`, sin autorizador).
-6. Llama a card-limits `restore-credit` con la fecha de la original → guarda → publica `RefundInitiated` y `RefundProcessed`.
+6. Llama a card-limits `restore-credit` con la fecha de la original (`cashAdvance: true` si la original fue un adelanto) → guarda → publica `RefundInitiated` y `RefundProcessed`.
 
 La devolución queda `APPROVED` y se liquida como cualquier otra transacción. `RefundResponse` y `TransactionResponse` informan `originalTransactionId`.
 
@@ -467,7 +467,7 @@ En compras y adelantos, `InsufficientFundsException`, `FraudDetectedException`, 
 | Puerto | Destino | Llamadas | URL por defecto (`services.*`) |
 |---|---|---|---|
 | `CardValidationPort` | card-data | `GET /api/v1/cards/{cardId}` → `status`, `isBlocked`, `isExpired`; `POST /api/v1/cards/{cardId}/validate-pin` con `{ pinBlock, pinKeyId }` → `valid` (adelantos); `POST …/validate-cvv` → `valid` (`ONLINE`/`MANUAL`) | `CARD_DATA_SERVICE_URL` = `http://localhost:8081` |
-| `CreditLimitPort` (`SagaCreditLimitPort` → `CreditLimitAdapter`) | card-limits | `POST /api/v1/credit-limits/validate/purchase` · `…/validate/cash-advance`; `GET …/card/{cardId}` (resuelve el `creditLimitId`); `POST …/{creditLimitId}/consume-purchase` · `…/consume-cash-advance` · `…/restore-credit` (reversos y devoluciones), con `operationId`; `POST …/{creditLimitId}/operations/{operationId}/cancel` (compensación, §4.7) | `CARD_LIMITS_SERVICE_URL` = `http://localhost:8082` |
+| `CreditLimitPort` (`SagaCreditLimitPort` → `CreditLimitAdapter`) | card-limits | `POST /api/v1/credit-limits/validate/purchase` · `…/validate/cash-advance`; `GET …/card/{cardId}` (resuelve el `creditLimitId`); `POST …/{creditLimitId}/consume-purchase` · `…/consume-cash-advance` · `…/restore-credit` (reversos y devoluciones, con `cashAdvance` según el tipo de la original), con `operationId`; `POST …/{creditLimitId}/operations/{operationId}/cancel` (compensación, §4.7) | `CARD_LIMITS_SERVICE_URL` = `http://localhost:8082` |
 | `MerchantValidationPort` | Base compartida | `merchants` (existe y `status = 'ACTIVE'`) y `payment_terminals` (terminal `ACTIVE` → `merchant_id`), por JPA de solo lectura | — |
 | `FraudCheckPort` | Servicio antifraude | `/api/v1/fraud/*` | `FRAUD_DETECTION_SERVICE_URL` = `http://localhost:8086` (no existe en el repo; si no responde se usa el cálculo local) |
 | `AuthorizationPort` | Autorizador | `/api/v1/authorization/*` | `AUTHORIZATION_SERVICE_URL` = `http://localhost:8087` (no existe en el repo); simulado por defecto |

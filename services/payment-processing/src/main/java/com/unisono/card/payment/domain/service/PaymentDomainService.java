@@ -196,7 +196,8 @@ public class PaymentDomainService {
         // 6. Undo the consumption of the original (available credit, daily and monthly quota)
         creditLimitPort.restoreCredit(refundTransaction.getTransactionId(), cardId, requested,
                 original.getTransactionDate().toLocalDate(),
-                "Refund " + refundTransaction.getTransactionId() + " of " + originalTransactionId);
+                "Refund " + refundTransaction.getTransactionId() + " of " + originalTransactionId,
+                original.getType() == TransactionType.CASH_ADVANCE);
 
         log.info("Refund processed successfully: {}", refundTransaction.getTransactionId());
         return refundTransaction;
@@ -231,7 +232,8 @@ public class PaymentDomainService {
         Money amount = transaction.getAmount().getEffectiveAmount();
         creditLimitPort.restoreCredit(transaction.getTransactionId(), transaction.getCardId(), amount,
                 transaction.getTransactionDate().toLocalDate(),
-                "Reversal of " + transaction.getTransactionId() + ": " + reason);
+                "Reversal of " + transaction.getTransactionId() + ": " + reason,
+                transaction.getType() == TransactionType.CASH_ADVANCE);
 
         log.info("Transaction reversed successfully: {}", transaction.getTransactionId());
     }

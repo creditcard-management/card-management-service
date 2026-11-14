@@ -141,9 +141,10 @@ class CreditLimitAdapterTest {
                 .andExpect(jsonPath("$.originalTransactionDate").value("2026-11-02"))
                 .andExpect(jsonPath("$.description").value("Reversal"))
                 .andExpect(jsonPath("$.operationId").value("op-1"))
+                .andExpect(jsonPath("$.cashAdvance").value(true))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        adapter.restoreCredit("op-1", CARD_ID, AMOUNT, ORIGINAL_DATE, "Reversal");
+        adapter.restoreCredit("op-1", CARD_ID, AMOUNT, ORIGINAL_DATE, "Reversal", true);
 
         server.verify();
     }
@@ -155,7 +156,7 @@ class CreditLimitAdapterTest {
                 .andExpect(jsonPath("$.description").value("x".repeat(255)))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        adapter.restoreCredit("op-1", CARD_ID, AMOUNT, ORIGINAL_DATE, "x".repeat(300));
+        adapter.restoreCredit("op-1", CARD_ID, AMOUNT, ORIGINAL_DATE, "x".repeat(300), false);
 
         server.verify();
     }
@@ -165,7 +166,7 @@ class CreditLimitAdapterTest {
         server.expect(requestTo(BASE + "/api/v1/credit-limits/card/" + CARD_ID.getValue()))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
 
-        assertThatThrownBy(() -> adapter.restoreCredit("op-1", CARD_ID, AMOUNT, ORIGINAL_DATE, "Reversal"))
+        assertThatThrownBy(() -> adapter.restoreCredit("op-1", CARD_ID, AMOUNT, ORIGINAL_DATE, "Reversal", false))
                 .isInstanceOf(ExternalServiceException.class);
     }
 

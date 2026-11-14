@@ -94,7 +94,8 @@ class CreditLimitRestoreTest {
         LocalDate yesterday = LocalDate.now().minusDays(1);
         CreditOperation fromYesterday = CreditOperation.reconstitute("op", creditLimit.getId(),
                 CreditOperation.Type.CONSUME_PURCHASE, CreditOperation.Status.APPLIED, applied.getCreditDelta(),
-                applied.getDailyDelta(), applied.getMonthlyDelta(), yesterday, "compra", null, null);
+                applied.getDailyDelta(), applied.getMonthlyDelta(), applied.getCashAdvanceDelta(), yesterday, "compra",
+                null, null);
 
         creditLimit.revertOperation(fromYesterday);
 

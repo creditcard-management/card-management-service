@@ -36,9 +36,11 @@ public interface CreditLimitPort {
      * @param transactionId           transaction recorded together with the restoration (the reversed
      *                                transaction, or the refund)
      * @param originalTransactionDate date of the transaction that consumed the credit
+     * @param cashAdvance             the original transaction was a cash advance: card-limits also gives back
+     *                                the cash advance usage (advances are cumulative against their limit)
      */
     void restoreCredit(TransactionId transactionId, CardId cardId, Money amount,
-                       java.time.LocalDate originalTransactionDate, String description);
+                       java.time.LocalDate originalTransactionDate, String description, boolean cashAdvance);
 
     record CreditCheck(boolean approved, String reason, Money available) {
     }

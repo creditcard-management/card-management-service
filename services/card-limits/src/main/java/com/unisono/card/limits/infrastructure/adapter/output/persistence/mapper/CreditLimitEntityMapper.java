@@ -38,6 +38,7 @@ public class CreditLimitEntityMapper {
                 // Cash advance limit - ⭐ Usar getCurrencyCode()
                 .cashAdvanceLimitAmount(creditLimit.getCashAdvanceLimit().getAmount().getAmount())
                 .cashAdvanceLimitCurrency(creditLimit.getCashAdvanceLimit().getAmount().getCurrencyCode())
+                .cashAdvanceConsumed(creditLimit.getCashAdvanceConsumed().getAmount().getAmount())
 
                 // Consumed credit - ⭐ Usar getCurrencyCode()
                 .consumedCreditAmount(creditLimit.getConsumedCredit().getAmount().getAmount())
@@ -91,6 +92,10 @@ public class CreditLimitEntityMapper {
                 createMoney(entity.getConsumedCreditAmount(), entity.getConsumedCreditCurrency())
         );
 
+        ConsumedCredit cashAdvanceConsumed = ConsumedCredit.of(
+                createMoney(entity.getCashAdvanceConsumed(), entity.getCashAdvanceLimitCurrency())
+        );
+
         AvailableCredit availableCredit = AvailableCredit.of(
                 createMoney(entity.getAvailableCreditAmount(), entity.getAvailableCreditCurrency())
         );
@@ -113,6 +118,7 @@ public class CreditLimitEntityMapper {
                 purchaseLimit,
                 cashAdvanceLimit,
                 consumedCredit,
+                cashAdvanceConsumed,
                 availableCredit,
                 dailyLimit,
                 monthlyLimit,

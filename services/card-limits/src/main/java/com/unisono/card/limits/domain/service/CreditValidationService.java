@@ -92,10 +92,10 @@ public class CreditValidationService implements ValidatePurchaseUseCase {
             if (!creditLimit.getCashAdvanceLimit().isEnabled()) {
                 return CreditLimit.NO_CASH_ADVANCE;
             }
-            if (!creditLimit.getCashAdvanceLimit().allows(requestedAmount)) {
+            if (requestedAmount.isGreaterThan(creditLimit.getCashAdvanceAvailable())) {
                 return String.format(
-                        "Se excede el límite de adelantos de %s",
-                        creditLimit.getCashAdvanceLimit().getAmount()
+                        "Se excede el límite de adelantos. Disponible para adelantos: %s (tope %s)",
+                        creditLimit.getCashAdvanceAvailable(), creditLimit.getCashAdvanceLimit().getAmount()
                 );
             }
         } else {

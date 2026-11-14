@@ -48,6 +48,10 @@ public class CreditLimitEntity {
     @Column(name = "cash_advance_limit_currency", nullable = false, length = 3)
     private String cashAdvanceLimitCurrency;
 
+    /** Parte de lo consumido que corresponde a adelantos (en la moneda del límite de adelantos) */
+    @Column(name = "cash_advance_consumed", nullable = false, precision = 15, scale = 2)
+    private BigDecimal cashAdvanceConsumed;
+
     // ========================================
     // Crédito actual
     // ========================================

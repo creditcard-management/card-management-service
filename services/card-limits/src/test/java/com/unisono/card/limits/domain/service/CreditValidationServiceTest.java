@@ -65,6 +65,19 @@ class CreditValidationServiceTest {
     }
 
     @Test
+    void cashAdvanceAboveWhatIsLeftForAdvancesIsRejectedWithItsReason() {
+        when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(true);
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(100_000), 0.3, "test"); // tope 30.000
+        limit.consumeForCashAdvance(Money.ofARS(20_000));
+        when(creditLimitRepository.findByCardId(CARD_ID)).thenReturn(Optional.of(limit));
+
+        ValidationResult advance = service.validateCashAdvance(new ValidateCashAdvanceCommand(CARD_ID, Money.ofARS(15_000)));
+
+        assertThat(advance.approved()).isFalse();
+        assertThat(advance.reason()).startsWith("Se excede el límite de adelantos. Disponible para adelantos: ARS 10000.00");
+    }
+
+    @Test
     void inactiveCardIsRejectedWithItsReason() {
         when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(false);
 
