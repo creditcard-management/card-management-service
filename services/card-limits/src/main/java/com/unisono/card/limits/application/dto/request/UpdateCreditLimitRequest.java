@@ -22,8 +22,10 @@ import java.math.BigDecimal;
 public class UpdateCreditLimitRequest {
 
     @NotNull(message = "El nuevo monto es obligatorio")
-    @DecimalMin(value = "0.01", message = "El monto debe ser mayor a cero")
-    @Schema(description = "Nuevo monto del límite", example = "75000.00")
+    // increase / decrease exigen > 0 (lo valida el dominio); en update-cash-advance-limit, 0 = sin adelantos
+    @DecimalMin(value = "0.00", message = "El monto no puede ser negativo")
+    @Schema(description = "Diferencia (increase / decrease) o nuevo tope de adelantos (0 = sin adelantos)",
+            example = "75000.00")
     private BigDecimal amount;
 
     @NotBlank(message = "La moneda es obligatoria")

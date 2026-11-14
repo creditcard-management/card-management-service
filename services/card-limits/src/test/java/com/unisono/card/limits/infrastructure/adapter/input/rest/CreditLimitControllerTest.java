@@ -94,6 +94,7 @@ class CreditLimitControllerTest {
 
         private AssignCreditLimitRequest.AssignCreditLimitRequestBuilder baseRequest() {
             return AssignCreditLimitRequest.builder()
+                    .cardId(CARD_ID)
                     .purchaseLimitAmount(new BigDecimal("500000"))
                     .currency(CURRENCY)
                     .cashAdvancePercentage(0.4)
@@ -160,6 +161,17 @@ class CreditLimitControllerTest {
 
             assertThat(command.dailyLimitAmount()).isNull();
             assertThat(command.monthlyLimitAmount()).isEqualTo(ars(300_000));
+        }
+
+        @Test
+        @DisplayName("rechaza con 400 un cardId del body distinto al de la URL, sin ejecutar el use case")
+        void shouldRejectMismatchedCardId() {
+            AssignCreditLimitRequest request = baseRequest().cardId("11111111-1111-1111-1111-111111111111").build();
+
+            assertThatThrownBy(() -> controller.assignCreditLimit(CARD_ID, request))
+                    .isInstanceOf(com.unisono.card.shared.domain.exception.ValidationException.class)
+                    .hasMessageContaining("no coincide");
+            verify(assignCreditLimitUseCase, never()).execute(any());
         }
 
         @Test

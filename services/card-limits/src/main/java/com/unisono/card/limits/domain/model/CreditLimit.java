@@ -33,6 +33,8 @@ import java.util.Objects;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class CreditLimit {
 
+    public static final String NO_CASH_ADVANCE = "La tarjeta no tiene adelantos en efectivo habilitados";
+
     private String id;
     private CardId cardId;
 
@@ -139,6 +141,7 @@ public class CreditLimit {
      * Aumenta el límite de compras
      */
     public void increasePurchaseLimit(Money additionalAmount, String reason, String changedBy) {
+        validateChangeAmount(additionalAmount);
         Money previousLimit = this.purchaseLimit.getAmount();
 
         this.purchaseLimit = this.purchaseLimit.increase(additionalAmount);
@@ -161,6 +164,7 @@ public class CreditLimit {
      * Disminuye el límite de compras
      */
     public void decreasePurchaseLimit(Money reductionAmount, String reason, String changedBy) {
+        validateChangeAmount(reductionAmount);
         Money previousLimit = this.purchaseLimit.getAmount();
 
         PurchaseLimit newLimit = this.purchaseLimit.decrease(reductionAmount);
@@ -320,6 +324,10 @@ public class CreditLimit {
      */
     public void consumeForCashAdvance(Money advanceAmount) {
         validatePurchaseAmount(advanceAmount);
+
+        if (!this.cashAdvanceLimit.isEnabled()) {
+            throw new BusinessRuleException(NO_CASH_ADVANCE);
+        }
 
         // Validar límite de adelantos
         if (!this.cashAdvanceLimit.allows(advanceAmount)) {
@@ -529,6 +537,12 @@ public class CreditLimit {
         }
         if (cashAdvancePercentage < 0 || cashAdvancePercentage > 1) {
             throw new ValidationException("El porcentaje de adelantos debe estar entre 0 y 1");
+        }
+    }
+
+    private static void validateChangeAmount(Money amount) {
+        if (amount == null || !amount.isPositive()) {
+            throw new ValidationException("El monto del cambio debe ser mayor a cero");
         }
     }
 
