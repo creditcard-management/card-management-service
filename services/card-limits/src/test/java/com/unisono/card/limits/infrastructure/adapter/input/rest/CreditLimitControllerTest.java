@@ -400,6 +400,8 @@ class CreditLimitControllerTest {
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(result.getBody()).isSameAs(creditLimitResponse);
+            // El id de la operación (del request o generado) vuelve en la respuesta para poder cancelarla
+            assertThat(result.getBody().getOperationId()).isEqualTo(consumeCommand.operationId()).isNotBlank();
             verify(recalculateAvailableCreditUseCase, never()).consumeForCashAdvance(any());
         }
 
@@ -430,6 +432,10 @@ class CreditLimitControllerTest {
             when(mapper.toResponse(creditLimit)).thenReturn(creditLimitResponse);
 
             ResponseEntity<CreditLimitResponse> result = controller.releaseCredit(CREDIT_LIMIT_ID, request);
+
+            assertThat(result.getBody().getOperationId())
+                    .startsWith(com.unisono.card.limits.domain.model.CreditOperation.GENERATED_ID_PREFIX)
+                    .isEqualTo(command.operationId());
 
             assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(result.getBody()).isSameAs(creditLimitResponse);

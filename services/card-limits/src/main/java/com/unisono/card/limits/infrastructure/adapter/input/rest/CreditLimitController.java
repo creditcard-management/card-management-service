@@ -332,6 +332,7 @@ public class CreditLimitController {
         CreditLimit creditLimit = recalculateAvailableCreditUseCase.consumeForPurchase(command);
 
         CreditLimitResponse response = mapper.toResponse(creditLimit);
+        response.setOperationId(command.operationId());
 
         log.info("Credit consumed successfully");
 
@@ -363,6 +364,7 @@ public class CreditLimitController {
         CreditLimit creditLimit = recalculateAvailableCreditUseCase.consumeForCashAdvance(command);
 
         CreditLimitResponse response = mapper.toResponse(creditLimit);
+        response.setOperationId(command.operationId());
 
         log.info("Credit consumed successfully");
 
@@ -375,7 +377,8 @@ public class CreditLimitController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Crédito liberado exitosamente"),
             @ApiResponse(responseCode = "400", description = "Datos inválidos"),
-            @ApiResponse(responseCode = "422", description = "El pago supera el crédito consumido"),
+            @ApiResponse(responseCode = "409", description = "El operationId fue cancelado o anulado"),
+            @ApiResponse(responseCode = "422", description = "El pago supera el crédito consumido, o el operationId ya existe con otro tipo o es de otro límite"),
             @ApiResponse(responseCode = "404", description = "Límite no encontrado")
     })
     public ResponseEntity<CreditLimitResponse> releaseCredit(
@@ -393,6 +396,7 @@ public class CreditLimitController {
         CreditLimit creditLimit = recalculateAvailableCreditUseCase.releaseCredit(command);
 
         CreditLimitResponse response = mapper.toResponse(creditLimit);
+        response.setOperationId(command.operationId());
 
         log.info("Credit released successfully");
 
@@ -418,10 +422,12 @@ public class CreditLimitController {
     ) {
         log.info("Restoring credit: {} - Amount: {}", creditLimitId, request.getAmount());
 
-        CreditLimit creditLimit = recalculateAvailableCreditUseCase.restoreCredit(
-                mapper.toRestoreCommand(creditLimitId, request));
+        RecalculateAvailableCreditUseCase.RestoreCreditCommand command = mapper.toRestoreCommand(creditLimitId, request);
+        CreditLimit creditLimit = recalculateAvailableCreditUseCase.restoreCredit(command);
+        CreditLimitResponse response = mapper.toResponse(creditLimit);
+        response.setOperationId(command.operationId());
 
-        return ResponseEntity.ok(mapper.toResponse(creditLimit));
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/{creditLimitId}/operations/{operationId}/cancel")

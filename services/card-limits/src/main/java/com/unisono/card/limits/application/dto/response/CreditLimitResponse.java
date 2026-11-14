@@ -1,5 +1,6 @@
 package com.unisono.card.limits.application.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -57,4 +58,9 @@ public class CreditLimitResponse {
 
     @Schema(description = "Última actualización")
     private LocalDateTime updatedAt;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Schema(description = "Id de la operación (consumos, restauraciones y liberaciones): el del request o el "
+            + "generado por card-limits (auto-…). Sirve para cancelarla")
+    private String operationId;
 }

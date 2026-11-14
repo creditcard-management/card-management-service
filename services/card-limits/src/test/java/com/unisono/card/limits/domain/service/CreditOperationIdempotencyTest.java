@@ -73,11 +73,92 @@ class CreditOperationIdempotencyTest {
     }
 
     @Test
-    void shouldNotRecordOperationsWithoutId() {
-        service.consumeForPurchase(new ConsumeCreditCommand(creditLimit.getId(), Money.ofARS(20_000), "compra"));
+    void shouldRecordOperationsWithoutIdUnderAGeneratedIdThatCanBeCancelled() {
+        ConsumeCreditCommand first = new ConsumeCreditCommand(creditLimit.getId(), Money.ofARS(20_000), "compra");
+        ConsumeCreditCommand second = new ConsumeCreditCommand(creditLimit.getId(), Money.ofARS(20_000), "compra");
+        service.consumeForPurchase(first);
+        service.consumeForPurchase(second);
+
+        // Sin id del cliente no hay idempotencia: son dos operaciones, cada una con su id generado
+        assertThat(first.operationId()).startsWith(CreditOperation.GENERATED_ID_PREFIX);
+        assertThat(second.operationId()).startsWith(CreditOperation.GENERATED_ID_PREFIX).isNotEqualTo(first.operationId());
+        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(40_000));
+        assertThat(operations.store).containsOnlyKeys(first.operationId(), second.operationId());
+        assertThat(operations.findById(first.operationId()).orElseThrow().getDescription()).isEqualTo("compra");
+
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), first.operationId()));
+        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(20_000));
+    }
+
+    @Test
+    void blankOperationIdIsTreatedAsMissing() {
+        assertThat(new ConsumeCreditCommand(creditLimit.getId(), Money.ofARS(1), "c", "  ").operationId())
+                .startsWith(CreditOperation.GENERATED_ID_PREFIX);
+        assertThat(new RestoreCreditCommand(creditLimit.getId(), Money.ofARS(1), LocalDate.now(), "r").operationId())
+                .startsWith(CreditOperation.GENERATED_ID_PREFIX);
+        assertThat(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(1), "p").operationId())
+                .startsWith(CreditOperation.GENERATED_ID_PREFIX);
+    }
+
+    // ========================================
+    // Liberaciones (pago del resumen)
+    // ========================================
+
+    @Test
+    void releaseIsRecordedAndAppliedOnlyOnceForTheSameOperationId() {
+        service.consumeForPurchase(consume("op-1", 30_000));
+
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(10_000), "pago", "pay-1"));
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(10_000), "pago", "pay-1"));
 
         assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(20_000));
-        assertThat(operations.store).isEmpty();
+        CreditOperation payment = operations.findById("pay-1").orElseThrow();
+        assertThat(payment.getType()).isEqualTo(CreditOperation.Type.RELEASE);
+        assertThat(payment.getCreditDelta()).isEqualTo(Money.ofARS(-10_000));
+        // El pago no toca el cupo diario ni el mensual
+        assertThat(payment.getDailyDelta().isZero()).isTrue();
+        assertThat(payment.getMonthlyDelta().isZero()).isTrue();
+        assertThat(payment.getDescription()).isEqualTo("pago");
+        assertThat(outbox).extracting(Map.Entry::getKey)
+                .containsExactly(KafkaTopics.CREDIT_LIMIT_CONSUMED, KafkaTopics.CREDIT_LIMIT_RELEASED);
+    }
+
+    @Test
+    void cancellingAReleaseConsumesThePaymentAgainAndPublishesPaymentCancelled() {
+        service.consumeForPurchase(consume("op-1", 30_000));
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(10_000), "pago", "pay-1"));
+
+        CancelOperationResult result = service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "pay-1"));
+
+        assertThat(result.outcome()).isEqualTo(CancelOutcome.CANCELLED);
+        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(30_000));
+        assertThat(creditLimit.getDailyLimit().getConsumed()).isEqualTo(Money.ofARS(30_000));
+        CreditLimitConsumedEvent undone = (CreditLimitConsumedEvent) outbox.get(outbox.size() - 1).getValue();
+        assertThat(undone.getOperationType()).isEqualTo("PAYMENT_CANCELLED");
+        assertThat(undone.getOperationId()).isEqualTo("pay-1");
+        assertThat(undone.getAmount()).isEqualByComparingTo("10000");
+    }
+
+    @Test
+    void releaseWithTheIdOfAnotherOperationTypeIsRejected() {
+        service.consumeForPurchase(consume("op-1", 30_000));
+
+        assertThatThrownBy(() -> service.releaseCredit(
+                new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(10_000), "pago", "op-1")))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("otro tipo");
+        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(30_000));
+    }
+
+    @Test
+    void voidedReleaseIsRejectedWhenItArrivesLate() {
+        service.consumeForPurchase(consume("op-1", 30_000));
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "pay-late"));
+
+        assertThatThrownBy(() -> service.releaseCredit(
+                new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(10_000), "pago", "pay-late")))
+                .isInstanceOf(CreditOperationCancelledException.class);
+        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(30_000));
     }
 
     @Test
@@ -284,7 +365,7 @@ class CreditOperationIdempotencyTest {
 
         CreditLimitReleasedEvent payment = (CreditLimitReleasedEvent) outbox.get(1).getValue();
         assertThat(payment.getOperationType()).isEqualTo("PAYMENT");
-        assertThat(payment.getOperationId()).isNull();
+        assertThat(payment.getOperationId()).startsWith(CreditOperation.GENERATED_ID_PREFIX);
         assertThat(payment.getAmount()).isEqualByComparingTo("10000");
         assertThat(payment.getConsumedAmount()).isEqualByComparingTo("20000");
 

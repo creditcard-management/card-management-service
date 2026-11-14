@@ -255,24 +255,24 @@ Los dos montos son opcionales (> 0 si se envían). Se valida la combinación fin
 |---|---|---|
 | `POST /{creditLimitId}/consume-purchase` | `{ "amount": 5000.00, "currency": "ARS", "description": "Compra en Mercado Libre", "operationId": "6f1c…" }` | Consume crédito por una compra |
 | `POST /{creditLimitId}/consume-cash-advance` | ídem | Consume crédito por un adelanto |
-| `POST /{creditLimitId}/release-credit` | `{ "paymentAmount": 10000.00, "currency": "ARS", "description": "Pago de resumen" }` | Libera crédito (pago del resumen). **422** si el pago supera lo consumido (no hay saldo a favor) |
+| `POST /{creditLimitId}/release-credit` | `{ "paymentAmount": 10000.00, "currency": "ARS", "description": "Pago de resumen", "operationId": "pago-…" }` | Libera crédito (pago del resumen). **422** si el pago supera lo consumido (no hay saldo a favor) |
 | `POST /{creditLimitId}/restore-credit` | `{ "amount": 1500.00, "currency": "ARS", "originalTransactionDate": "2026-11-03", "description": "Reverso de …", "operationId": "7a2d…" }` | Deshace un consumo (reverso o devolución): disponible y cupo diario y mensual del período de la transacción original. Si ya se pagó, el excedente no se restaura (se loguea) |
-| `POST /{creditLimitId}/operations/{operationId}/cancel` | — | Deshace exactamente un consumo o una restauración enviados con `operationId` (ver abajo). Responde `{ "operationId", "outcome", "availableCredit", "currency", "overLimitAmount" }` |
+| `POST /{creditLimitId}/operations/{operationId}/cancel` | — | Deshace exactamente un consumo, una restauración o una liberación (ver abajo). Responde `{ "operationId", "outcome", "availableCredit", "currency", "overLimitAmount" }` |
 
-Respuesta **200** `CreditLimitResponse`. `description` es obligatoria; solo se guarda en `credit_operations` cuando viene `operationId`.
+Respuesta **200** `CreditLimitResponse`, con el `operationId` de la operación (el del request o el generado). `description` es obligatoria y se guarda en `credit_operations`.
 
 **Estado de la tarjeta.** Los consumos (`consume-purchase`, `consume-cash-advance`) exigen que la tarjeta esté `ACTIVE` y no eliminada: si no, **422**. Se controla después de la idempotencia, así que repetir un `operationId` ya aplicado responde 200 aunque la tarjeta se haya bloqueado después. Restauración, liberación y cancelación no miran el estado: los reversos, devoluciones y pagos de una tarjeta bloqueada, cancelada o vencida tienen que poder aplicarse.
 
-**Operaciones idempotentes (`operationId`, opcional, hasta 64 caracteres).** payment-processing lo envía siempre ([PAYMENT.md §4.7](PAYMENT.md)):
+**Registro e idempotencia (`operationId`, opcional, hasta 64 caracteres).** payment-processing lo envía siempre ([PAYMENT.md §4.7](PAYMENT.md)):
 
-- Un consumo o una restauración con `operationId` se registra en `credit_operations` con lo que movió: deltas de lo consumido, del cupo diario y del mensual, y la fecha en que se aplicó.
-- Repetir el mismo `operationId` no vuelve a aplicar nada: responde 200 con el estado actual. Si llega con otro tipo de operación o para otro límite, responde 422.
+- **Todo** consumo, restauración y liberación se registra en `credit_operations` con lo que movió: deltas de lo consumido, del cupo diario y del mensual, y la fecha en que se aplicó. Una liberación no toca el cupo diario ni el mensual.
+- **Sin `operationId`**, card-limits genera uno (`auto-<uuid>`) y lo devuelve en la respuesta. Esa operación no es idempotente (repetir el request aplica dos veces), pero se puede cancelar con el id generado.
+- **Con `operationId`**, repetir el mismo id no vuelve a aplicar nada: responde 200 con el estado actual. Si llega con otro tipo de operación o para otro límite, responde 422.
 - **Cancelar** deshace exactamente esos deltas. Lo consumido no baja de cero. El cupo diario o mensual solo se toca si sigue siendo el mismo día o mes: si ya se reseteó, no hay nada que devolver.
-- **No valida límites**, a propósito. Deshacer una restauración significa que el reverso o la devolución nunca ocurrieron, así que lo restaurado se vuelve a consumir aunque la tarjeta ya lo haya gastado. En ese caso el disponible queda **negativo** (la tarjeta está excedida): la respuesta informa `overLimitAmount`, se loguea un `WARN` y las compras siguientes se rechazan por crédito insuficiente hasta que pague. `CreditLimit.getOverLimitAmount()` devuelve el exceso. `outcome`:
+- **No valida límites**, a propósito. Deshacer una restauración significa que el reverso o la devolución nunca ocurrieron, así que lo restaurado se vuelve a consumir aunque la tarjeta ya lo haya gastado. Lo mismo al deshacer una liberación (un pago que se rechazó después). En ese caso el disponible queda **negativo** (la tarjeta está excedida): la respuesta informa `overLimitAmount`, se loguea un `WARN` y las compras siguientes se rechazan por crédito insuficiente hasta que pague. `CreditLimit.getOverLimitAmount()` devuelve el exceso. `outcome`:
   - `CANCELLED`: estaba aplicada y se deshizo.
   - `VOIDED`: todavía no había llegado. Queda anulada y, si llega después, se rechaza con **409**. Cubre el caso de un timeout en el que el request todavía no se aplicó.
   - `ALREADY_CANCELLED`: ya estaba cancelada o anulada; no se hace nada.
-- Sin `operationId`, el comportamiento es el anterior: no se registra y repetir el request aplica dos veces.
 
 Todas las modificaciones (cambios de límites, consumo, restauración, liberación y cancelación) bloquean la fila del límite (`SELECT … FOR UPDATE`) hasta el fin de la transacción, así que se ejecutan de a una por límite.
 
@@ -313,7 +313,7 @@ Mismo formato que `card-data`:
 | `NotFoundException` | 404 | Límite o tarjeta inexistente |
 | `ValidationException` (incluye `InvalidValueObjectException`) | 400 | Montos fuera de rango en los VO, monto cero, moneda inválida |
 | `MethodArgumentNotValidException` | 400 + `fieldErrors` | Bean Validation |
-| `CreditOperationCancelledException` | 409 | Llega un consumo o una restauración cuyo `operationId` ya se canceló (anulado) |
+| `CreditOperationCancelledException` | 409 | Llega un consumo, una restauración o una liberación cuyo `operationId` ya se canceló (anulado) |
 | `BusinessRuleException` | 422 | Monedas distintas, tarjeta no elegible o no activa al consumir, límite duplicado, crédito insuficiente, límite diario o mensual excedido, reducción por debajo de lo consumido o del límite de adelantos, pago mayor a lo consumido, diario mayor al mensual |
 | Otras | 500 | — |
 
@@ -414,10 +414,10 @@ No hay jobs programados. Al leer o consumir, `DailyLimit` y `MonthlyLimit` compa
 
 ### 6.4 `credit_operations`
 
-Operaciones de crédito identificadas por el cliente (V12), una por `operationId`:
+Todos los movimientos de crédito (V12; `RELEASE` desde V17), uno por `operationId`:
 
-- `operation_id` (PK, hasta 64 caracteres) y `credit_limit_id` (FK a `credit_limits`).
-- `operation_type` (`CONSUME_PURCHASE`, `CONSUME_CASH_ADVANCE` o `RESTORE`; nulo en las `VOIDED`) y `status` (`APPLIED`, `CANCELLED` o `VOIDED`).
+- `operation_id` (PK, hasta 64 caracteres): el del cliente o `auto-<uuid>` si no mandó uno. `credit_limit_id` (FK a `credit_limits`).
+- `operation_type` (`CONSUME_PURCHASE`, `CONSUME_CASH_ADVANCE`, `RESTORE` o `RELEASE`; nulo en las `VOIDED`) y `status` (`APPLIED`, `CANCELLED` o `VOIDED`).
 - `credit_delta`, `daily_delta`, `monthly_delta`: lo que movió la operación (positivo = consumió, negativo = devolvió), en `currency`.
 - `applied_on`: fecha en que se aplicó (define si el cupo diario y mensual todavía se pueden revertir).
 - `description`, `created_at` y `cancelled_at`.
@@ -434,7 +434,7 @@ Transactional outbox de card-limits (V15), con la misma estructura que `outbox_e
 
 ### 6.6 Notas
 
-- **Esquema:** lo crea Flyway desde el repo `card-management-database`: `credit_limits` en V2, `credit_limit_history` en V3, `credit_operations` en V12 y `credit_limit_outbox_events` en V15. Este módulo usa `ddl-auto: validate` con Flyway deshabilitado, así que las tablas deben existir antes del arranque.
+- **Esquema:** lo crea Flyway desde el repo `card-management-database`: `credit_limits` en V2, `credit_limit_history` en V3, `credit_operations` en V12 (`RELEASE` admitido desde V17) y `credit_limit_outbox_events` en V15. Este módulo usa `ddl-auto: validate` con Flyway deshabilitado, así que las tablas deben existir antes del arranque.
 - **Restricciones de la migración que el código no refleja:**
   - `credit_limits.card_id` → FK a `cards(id)` (`ON DELETE CASCADE`).
   - `chk_consumed_not_negative`: `consumed_credit_amount`, `daily_limit_consumed` y `monthly_limit_consumed` ≥ 0.
@@ -507,5 +507,4 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 3. **Asignaciones bajas con adelantos fallan.** Con el 30% por defecto, cualquier límite de compras menor a ARS 1.666,67 da un tope de adelantos menor al mínimo de ARS 500 y la asignación se rechaza (400). Sin adelantos (`cashAdvancePercentage: 0`) sí se pueden asignar.
 4. **Límites diario y mensual independientes del límite de compras.** Los defaults (100.000 / 500.000) se aplican aunque el límite de compras sea menor.
 5. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
-6. **Registro de movimientos incompleto.** Solo los consumos y restauraciones con `operationId` quedan en `credit_operations`. Los que llegan sin id y las liberaciones (pago del resumen) no dejan registro ni son idempotentes.
-7. **Sin saldo a favor.** `restore-credit` baja lo consumido como mucho hasta cero. Si la tarjeta ya pagó el consumo que se devuelve, el excedente no se acredita y solo se loguea.
+6. **Sin saldo a favor.** `restore-credit` baja lo consumido como mucho hasta cero. Si la tarjeta ya pagó el consumo que se devuelve, el excedente no se acredita y solo se loguea.

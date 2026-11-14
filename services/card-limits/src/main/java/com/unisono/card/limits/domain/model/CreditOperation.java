@@ -25,7 +25,27 @@ import java.util.Objects;
 @Getter
 public class CreditOperation {
 
-    public enum Type { CONSUME_PURCHASE, CONSUME_CASH_ADVANCE, RESTORE }
+    public enum Type {
+        CONSUME_PURCHASE, CONSUME_CASH_ADVANCE, RESTORE, RELEASE;
+
+        public boolean isConsumption() {
+            return this == CONSUME_PURCHASE || this == CONSUME_CASH_ADVANCE;
+        }
+    }
+
+    /** Prefijo de los ids que genera card-limits cuando el cliente no manda operationId */
+    public static final String GENERATED_ID_PREFIX = "auto-";
+
+    /**
+     * El operationId del cliente o, si no mandó uno, uno generado: todo movimiento queda registrado. Con un id
+     * generado la operación no es idempotente (cada request es una operación nueva), pero se puede cancelar con
+     * el id que devuelve la respuesta.
+     */
+    public static String operationIdOrGenerated(String operationId) {
+        return operationId == null || operationId.isBlank()
+                ? GENERATED_ID_PREFIX + java.util.UUID.randomUUID()
+                : operationId;
+    }
 
     public enum Status { APPLIED, CANCELLED, VOIDED }
 

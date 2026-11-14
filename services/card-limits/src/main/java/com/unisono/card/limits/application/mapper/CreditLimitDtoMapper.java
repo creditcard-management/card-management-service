@@ -135,7 +135,8 @@ public class CreditLimitDtoMapper {
         return new RecalculateAvailableCreditUseCase.ReleaseCreditCommand(
                 creditLimitId,
                 amount,
-                request.getDescription()
+                request.getDescription(),
+                blankToNull(request.getOperationId())
         );
     }
 

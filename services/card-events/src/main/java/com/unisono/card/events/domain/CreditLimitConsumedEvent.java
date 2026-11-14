@@ -19,7 +19,7 @@ public class CreditLimitConsumedEvent extends DomainEvent {
     private final String creditLimitId;
     /** Id de la operación de crédito (el que envía payment-processing); nulo si no vino */
     private final String operationId;
-    /** PURCHASE, CASH_ADVANCE o REFUND_CANCELLED (se deshizo una devolución) */
+    /** PURCHASE, CASH_ADVANCE, REFUND_CANCELLED (se deshizo una devolución) o PAYMENT_CANCELLED (se deshizo un pago) */
     private final String operationType;
     /** Monto consumido por este movimiento */
     private final BigDecimal amount;

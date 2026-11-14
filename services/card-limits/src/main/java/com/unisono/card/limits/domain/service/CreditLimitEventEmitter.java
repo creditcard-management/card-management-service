@@ -28,7 +28,7 @@ public class CreditLimitEventEmitter {
 
     /** Qué movió el crédito consumido (operationType de los eventos consumed/released). */
     public enum Movement {
-        PURCHASE, CASH_ADVANCE, PAYMENT, REFUND, CONSUMPTION_CANCELLED, REFUND_CANCELLED
+        PURCHASE, CASH_ADVANCE, PAYMENT, REFUND, CONSUMPTION_CANCELLED, REFUND_CANCELLED, PAYMENT_CANCELLED
     }
 
     private final EventOutboxPort eventOutbox;
