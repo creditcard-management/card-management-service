@@ -4,8 +4,6 @@ import com.unisono.card.data.application.dto.request.ActivateCardRequest;
 import com.unisono.card.data.application.dto.request.CancelCardRequest;
 import com.unisono.card.data.application.dto.request.CreateCardRequest;
 import com.unisono.card.data.application.dto.request.IssueCardRequest;
-import com.unisono.card.data.application.dto.request.UpdateActivatedAtRequest;
-import com.unisono.card.data.application.dto.request.UpdateCardDataRequest;
 import com.unisono.card.data.application.dto.request.UpdateCardStatusRequest;
 import com.unisono.card.data.application.dto.response.CardDetailResponse;
 import com.unisono.card.data.application.dto.response.CardResponse;
@@ -269,66 +267,5 @@ public class CardController {
         );
 
         return ResponseEntity.ok(mapper.toResponse(card));
-    }
-
-    /**
-     * Registrar la fecha de activación.
-     *
-     * @deprecated card-lifecycle usa {@code POST /{cardId}/activate}
-     */
-    @Deprecated
-    @PutMapping("/{cardId}/activated-at")
-    @Operation(summary = "Registrar fecha de activación (deprecado)", deprecated = true,
-            description = "Registra la fecha y hora en que se activó la tarjeta. Usar POST /{cardId}/activate")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Fecha registrada"),
-            @ApiResponse(responseCode = "400", description = "Fecha ausente o con formato inválido"),
-            @ApiResponse(responseCode = "404", description = "Tarjeta no encontrada")
-    })
-    public ResponseEntity<Void> updateActivatedAt(
-            @Parameter(description = "ID de la tarjeta")
-            @PathVariable String cardId,
-
-            @Valid @RequestBody UpdateActivatedAtRequest request
-    ) {
-        log.info("Actualizando fecha de activación: {}", cardId);
-
-        cardManagementService.updateActivatedAt(CardId.of(cardId), request.getActivatedAt());
-
-        return ResponseEntity.ok().build();
-    }
-
-    /**
-     * Cargar los datos de emisión sin cambiar el estado.
-     *
-     * @deprecated card-lifecycle usa {@code POST /{cardId}/issue}
-     */
-    @Deprecated
-    @PutMapping("/{cardId}/card-data")
-    @Operation(summary = "Cargar datos de emisión (deprecado)", deprecated = true,
-            description = "Asigna PAN, CVV, PIN y vencimiento sin cambiar el estado. Usar POST /{cardId}/issue")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Datos de emisión cargados"),
-            @ApiResponse(responseCode = "400", description = "Datos ausentes o inválidos"),
-            @ApiResponse(responseCode = "404", description = "Tarjeta no encontrada")
-    })
-    public ResponseEntity<Void> updateCardData(
-            @Parameter(description = "ID de la tarjeta")
-            @PathVariable String cardId,
-
-            @Valid @RequestBody UpdateCardDataRequest request
-    ) {
-        log.info("Actualizando datos de tarjeta: {}", cardId);
-
-        cardManagementService.updateCardData(
-                CardId.of(cardId),
-                request.getCardNumber(),
-                request.getCvv(),
-                request.getPin(),
-                request.getExpirationMonth(),
-                request.getExpirationYear()
-        );
-
-        return ResponseEntity.ok().build();
     }
 }
