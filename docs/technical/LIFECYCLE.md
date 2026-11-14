@@ -222,7 +222,7 @@ Lee el estado en `card-data`, valida `REJECT` con la state machine (solo desde `
 
 ```json
 {
-  "cardNumber": "4532123456789012",
+  "cardNumber": "4532015112830366",
   "cvv": "123",
   "pin": "4821",
   "expirationMonth": 12,
@@ -513,4 +513,3 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-lifecycle-service
 Comportamientos actuales del código que conviene resolver:
 
 1. **Consistencia entre servicios.** Emisión y activación hacen varias llamadas REST de escritura seguidas: si la segunda falla, `card-data` queda a medio actualizar y no hay compensación. Si falla el guardado de la transición después de las llamadas, el cambio en `card-data` ya está hecho y no queda historial. `RestTemplate` no tiene timeouts.
-2. **Cobertura de tests parcial.** Hay tests del consumidor Kafka (incluidos reintentos, DLQ y su reproceso contra un broker embebido), de la state machine con sus guards (`SpringStateMachineAdapterTest`), del cliente REST (`CardDataRestClientTest`), de la activación (`ActivateCardServiceTest`) y de rechazo, bloqueo, desbloqueo y cancelación (`BlockAndCancelServicesTest`); faltan los de aprobación, emisión y del controller.
