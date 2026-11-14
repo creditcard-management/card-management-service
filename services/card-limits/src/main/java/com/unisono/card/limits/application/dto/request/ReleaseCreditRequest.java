@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -33,4 +34,11 @@ public class ReleaseCreditRequest {
     @NotBlank(message = "La descripción es obligatoria")
     @Schema(description = "Descripción del pago", example = "Pago de resumen")
     private String description;
+
+    @Size(max = 64, message = "El id de operación no puede superar 64 caracteres")
+    @Schema(description = "Id de la operación, opcional. Con un id la operación es idempotente. Si no viene, card-limits genera uno "
+            + "(auto-…) y lo devuelve en la respuesta. Con cualquiera de los dos se puede cancelar con "
+            + "POST /{creditLimitId}/operations/{operationId}/cancel",
+            example = "pago-2026-11-0001")
+    private String operationId;
 }

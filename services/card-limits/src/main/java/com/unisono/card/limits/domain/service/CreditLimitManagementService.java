@@ -232,21 +232,11 @@ public class CreditLimitManagementService implements
 
     @Override
     public CreditLimit releaseCredit(ReleaseCreditCommand command) {
-        log.info("Releasing credit: {} - Payment: {}",
-                command.creditLimitId(), command.paymentAmount());
+        log.info("Releasing credit: {} - Payment: {}{}",
+                command.creditLimitId(), command.paymentAmount(), operationLog(command.operationId()));
 
-        CreditLimit creditLimit = lockCreditLimitOrThrow(command.creditLimitId());
-        Money consumedBefore = creditLimit.getConsumedCredit().getAmount();
-
-        creditLimit.releaseCredit(command.paymentAmount());
-
-        CreditLimit savedLimit = creditLimitRepository.save(creditLimit);
-        eventEmitter.creditMoved(savedLimit, consumedBefore, Movement.PAYMENT, null);
-
-        log.info("Credit released successfully. Available: {}",
-                savedLimit.getAvailableCredit().getAmount());
-
-        return savedLimit;
+        return applyOperation(command.creditLimitId(), command.operationId(), CreditOperation.Type.RELEASE,
+                command.description(), Movement.PAYMENT, creditLimit -> creditLimit.releaseCredit(command.paymentAmount()));
     }
 
     @Override
@@ -292,14 +282,14 @@ public class CreditLimitManagementService implements
         CreditLimit savedLimit = creditLimitRepository.save(creditLimit);
         operation.cancel();
         creditOperationRepository.save(operation);
-        eventEmitter.creditMoved(savedLimit, consumedBefore, operation.getType() == CreditOperation.Type.RESTORE
-                ? Movement.REFUND_CANCELLED : Movement.CONSUMPTION_CANCELLED, command.operationId());
+        eventEmitter.creditMoved(savedLimit, consumedBefore, cancelledMovement(operation.getType()),
+                command.operationId());
 
         log.info("Credit operation {} ({}) cancelled. Available: {}",
                 command.operationId(), operation.getType(), savedLimit.getAvailableCredit().getAmount());
         if (savedLimit.getOverLimitAmount().isPositive()) {
             log.warn("⚠️ Credit limit {} is over its limit by {} after undoing operation {} ({}): the restored "
-                            + "credit had already been spent. New purchases are declined until it is paid",
+                            + "or paid credit had already been spent. New purchases are declined until it is paid",
                     command.creditLimitId(), savedLimit.getOverLimitAmount(), command.operationId(), operation.getType());
         }
         return new CancelOperationResult(CancelOutcome.CANCELLED, savedLimit);
@@ -310,34 +300,33 @@ public class CreditLimitManagementService implements
      * cancelaciones) leen con {@link #lockCreditLimitOrThrow}: el guardado reescribe la fila completa, así que
      * sin el lock una modificación concurrente pisaría a la otra (lost update).
      *
-     * Aplica un consumo o una restauración con el límite bloqueado. Con operationId es idempotente:
-     * una operación ya aplicada no se repite y una cancelada se rechaza.
+     * Aplica un consumo, una restauración o una liberación con el límite bloqueado y la registra en
+     * credit_operations. Es idempotente por operationId: una operación ya aplicada no se repite y una cancelada
+     * se rechaza (con un id generado, cada request es una operación nueva).
      */
     private CreditLimit applyOperation(String creditLimitId, String operationId, CreditOperation.Type type,
                                        String description, Movement movement, Consumer<CreditLimit> action) {
         CreditLimit creditLimit = lockCreditLimitOrThrow(creditLimitId);
 
-        if (operationId != null) {
-            Optional<CreditOperation> existing = creditOperationRepository.findById(operationId);
-            if (existing.isPresent()) {
-                CreditOperation operation = existing.get();
-                validateOwnership(operation, creditLimitId);
-                if (!operation.isApplied()) {
-                    throw new CreditOperationCancelledException(operationId);
-                }
-                if (operation.getType() != type) {
-                    throw new BusinessRuleException(String.format(
-                            "La operación %s ya existe con otro tipo (%s)", operationId, operation.getType()));
-                }
-                log.info("Credit operation {} was already applied: nothing to do", operationId);
-                return creditLimit;
+        Optional<CreditOperation> existing = creditOperationRepository.findById(operationId);
+        if (existing.isPresent()) {
+            CreditOperation operation = existing.get();
+            validateOwnership(operation, creditLimitId);
+            if (!operation.isApplied()) {
+                throw new CreditOperationCancelledException(operationId);
             }
+            if (operation.getType() != type) {
+                throw new BusinessRuleException(String.format(
+                        "La operación %s ya existe con otro tipo (%s)", operationId, operation.getType()));
+            }
+            log.info("Credit operation {} was already applied: nothing to do", operationId);
+            return creditLimit;
         }
 
-        // Solo los consumos exigen tarjeta activa: restaurar (reversos y devoluciones) debe seguir funcionando
-        // sobre una tarjeta ya bloqueada, cancelada o vencida. Va después de la idempotencia: repetir una
-        // operación ya aplicada responde 200 aunque la tarjeta se haya bloqueado mientras tanto
-        if (type != CreditOperation.Type.RESTORE) {
+        // Solo los consumos exigen tarjeta activa: restaurar (reversos y devoluciones) y liberar (pagos) deben
+        // seguir funcionando sobre una tarjeta ya bloqueada, cancelada o vencida. Va después de la idempotencia:
+        // repetir una operación ya aplicada responde 200 aunque la tarjeta se haya bloqueado mientras tanto
+        if (type.isConsumption()) {
             ensureCardActive(creditLimit);
         }
 
@@ -345,15 +334,22 @@ public class CreditLimitManagementService implements
         action.accept(creditLimit);
         CreditLimit savedLimit = creditLimitRepository.save(creditLimit);
 
-        if (operationId != null) {
-            creditOperationRepository.save(CreditOperation.applied(
-                    operationId, creditLimitId, type, before, creditLimit.consumptionSnapshot(), description));
-        }
+        // Todo movimiento queda registrado: con el operationId del cliente o con uno generado (ver los commands)
+        creditOperationRepository.save(CreditOperation.applied(
+                operationId, creditLimitId, type, before, creditLimit.consumptionSnapshot(), description));
         // Solo cuando se aplicó: una operación repetida (idempotente) ya publicó su evento
         eventEmitter.creditMoved(savedLimit, before.credit(), movement, operationId);
 
         log.info("Credit operation {} applied. Available: {}", type, savedLimit.getAvailableCredit().getAmount());
         return savedLimit;
+    }
+
+    private static Movement cancelledMovement(CreditOperation.Type type) {
+        return switch (type) {
+            case RESTORE -> Movement.REFUND_CANCELLED;
+            case RELEASE -> Movement.PAYMENT_CANCELLED;
+            case CONSUME_PURCHASE, CONSUME_CASH_ADVANCE -> Movement.CONSUMPTION_CANCELLED;
+        };
     }
 
     private void ensureCardActive(CreditLimit creditLimit) {
@@ -371,7 +367,7 @@ public class CreditLimitManagementService implements
     }
 
     private static String operationLog(String operationId) {
-        return operationId != null ? " (operation " + operationId + ")" : "";
+        return " (operation " + operationId + ")";
     }
 
     private CreditLimit lockCreditLimitOrThrow(String creditLimitId) {

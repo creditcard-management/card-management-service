@@ -43,8 +43,9 @@ public class RestoreCreditRequest {
     private String description;
 
     @Size(max = 64, message = "El id de operación no puede superar 64 caracteres")
-    @Schema(description = "Id de la operación, opcional. Con un id la operación es idempotente "
-            + "y se puede cancelar con POST /{creditLimitId}/operations/{operationId}/cancel",
+    @Schema(description = "Id de la operación, opcional. Con un id la operación es idempotente. Si no viene, card-limits genera uno "
+            + "(auto-…) y lo devuelve en la respuesta. Con cualquiera de los dos se puede cancelar con "
+            + "POST /{creditLimitId}/operations/{operationId}/cancel",
             example = "6f1c2d3e-8a9b-4c5d-9e0f-1a2b3c4d5e6f")
     private String operationId;
 }

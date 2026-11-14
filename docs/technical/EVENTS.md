@@ -225,12 +225,13 @@ Los publica `card-limits` con su propio transactional outbox (`credit_limit_outb
 
 | Operación en card-limits | Evento | `operationType` | `operationId` |
 |---|---|---|---|
-| `consume-purchase` | `consumed` | `PURCHASE` | El del request (payment-processing siempre lo envía) |
+| `consume-purchase` | `consumed` | `PURCHASE` | El del request (payment-processing siempre lo envía) o el generado por card-limits (`auto-<uuid>`) |
 | `consume-cash-advance` | `consumed` | `CASH_ADVANCE` | Ídem |
 | `restore-credit` (reverso, devolución) | `released` | `REFUND` | Ídem |
-| `release-credit` (pago del resumen) | `released` | `PAYMENT` | Nulo |
+| `release-credit` (pago del resumen) | `released` | `PAYMENT` | Ídem |
 | `operations/{id}/cancel` de un consumo | `released` | `CONSUMPTION_CANCELLED` | El de la operación cancelada |
 | `operations/{id}/cancel` de una restauración | `consumed` | `REFUND_CANCELLED` | Ídem |
+| `operations/{id}/cancel` de una liberación | `consumed` | `PAYMENT_CANCELLED` | Ídem |
 
 - `amount` es lo que movió la operación. `consumedAmount` y `availableAmount` son los saldos después del cambio.
 - **No publican:** una operación repetida con el mismo `operationId` (ya publicó la primera vez), la cancelación de algo ya cancelado o que nunca llegó (`VOIDED`), y una restauración que no bajó nada (lo consumido ya estaba en cero; no hay saldo a favor). Tampoco las operaciones rechazadas: la transacción se revierte con su evento.

@@ -1,6 +1,7 @@
 package com.unisono.card.limits.domain.port.input;
 
 import com.unisono.card.limits.domain.model.CreditLimit;
+import com.unisono.card.limits.domain.model.CreditOperation;
 import com.unisono.card.shared.domain.valueobject.Money;
 
 /**
@@ -41,7 +42,7 @@ public interface RecalculateAvailableCreditUseCase {
     // ========================================
 
     /**
-     * @param operationId opcional: con un id, la operación es idempotente y se puede cancelar
+     * @param operationId el del cliente (idempotente) o, si no viene, uno generado; con él se puede cancelar
      */
     record ConsumeCreditCommand(
             String creditLimitId,
@@ -49,13 +50,17 @@ public interface RecalculateAvailableCreditUseCase {
             String description,
             String operationId
     ) {
+        public ConsumeCreditCommand {
+            operationId = CreditOperation.operationIdOrGenerated(operationId);
+        }
+
         public ConsumeCreditCommand(String creditLimitId, Money amount, String description) {
             this(creditLimitId, amount, description, null);
         }
     }
 
     /**
-     * @param operationId opcional: con un id, la operación es idempotente y se puede cancelar
+     * @param operationId el del cliente (idempotente) o, si no viene, uno generado; con él se puede cancelar
      */
     record RestoreCreditCommand(
             String creditLimitId,
@@ -64,6 +69,10 @@ public interface RecalculateAvailableCreditUseCase {
             String description,
             String operationId
     ) {
+        public RestoreCreditCommand {
+            operationId = CreditOperation.operationIdOrGenerated(operationId);
+        }
+
         public RestoreCreditCommand(String creditLimitId, Money amount, java.time.LocalDate originalTransactionDate,
                                     String description) {
             this(creditLimitId, amount, originalTransactionDate, description, null);
@@ -94,9 +103,21 @@ public interface RecalculateAvailableCreditUseCase {
         ALREADY_CANCELLED
     }
 
+    /**
+     * @param operationId el del cliente (idempotente) o, si no viene, uno generado; con él se puede cancelar
+     */
     record ReleaseCreditCommand(
             String creditLimitId,
             Money paymentAmount,
-            String description
-    ) {}
+            String description,
+            String operationId
+    ) {
+        public ReleaseCreditCommand {
+            operationId = CreditOperation.operationIdOrGenerated(operationId);
+        }
+
+        public ReleaseCreditCommand(String creditLimitId, Money paymentAmount, String description) {
+            this(creditLimitId, paymentAmount, description, null);
+        }
+    }
 }
