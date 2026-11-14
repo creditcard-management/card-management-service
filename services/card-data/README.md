@@ -182,13 +182,13 @@ Servicio de encriptación simétrica AES-256-GCM.
 private EncryptionService encryptionService;
 
 // Encriptar
-String plainText = "4532123456789012";
+String plainText = "4532015112830366";
 String encrypted = encryptionService.encrypt(plainText);
 // Output: "IV:ciphertext" en Base64
 
 // Desencriptar
 String decrypted = encryptionService.decrypt(encrypted);
-// Output: "4532123456789012"
+// Output: "4532015112830366"
 ```
 
 **Características:**
@@ -332,7 +332,7 @@ void shouldThrowExceptionWhenAddingDifferentCurrencies() {
 
 @Test
 void shouldEncryptAndDecryptSuccessfully() {
-    String original = "4532123456789012";
+    String original = "4532015112830366";
     
     String encrypted = encryptionService.encrypt(original);
     String decrypted = encryptionService.decrypt(encrypted);
@@ -677,7 +677,7 @@ public class CardHolder {
 
 ```java
 // Crear
-CardNumber cardNumber = CardNumber.of("4532123456789012");
+CardNumber cardNumber = CardNumber.of("4532015112830366");
 
 // Validaciones
 - 13-19 dígitos
@@ -685,8 +685,8 @@ CardNumber cardNumber = CardNumber.of("4532123456789012");
 - Detección automática de tipo (BIN)
 
 // Métodos
-String lastFour = cardNumber.getLastFourDigits();  // "9012"
-String masked = cardNumber.getMaskedNumber();      // "**** **** **** 9012"
+String lastFour = cardNumber.getLastFourDigits();  // "0366"
+String masked = cardNumber.getMaskedNumber();      // "**** **** **** 0366"
 CardType type = cardNumber.detectType();           // VISA
 ```
 
@@ -754,7 +754,7 @@ public enum CardType {
     NARANJA("Naranja", List.of("589562"));
     
     // Detección automática por BIN
-    CardType type = CardType.detectFromCardNumber("4532123456789012");
+    CardType type = CardType.detectFromCardNumber("4532015112830366");
     // Output: VISA
 }
 ```
@@ -828,8 +828,8 @@ Content-Type: application/json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "clientId": "20123456789",
-  "maskedCardNumber": "**** **** **** 9012",
-  "lastFourDigits": "9012",
+  "maskedCardNumber": "**** **** **** 0366",
+  "lastFourDigits": "0366",
   "type": "VISA",
   "category": "GOLD",
   "status": "REQUESTED",
@@ -859,7 +859,7 @@ GET /api/v1/cards/client/{clientId}
 #### **Buscar Tarjeta**
 
 ```http
-GET /api/v1/cards/search?lastFourDigits=9012&clientId=20123456789
+GET /api/v1/cards/search?lastFourDigits=0366&clientId=20123456789
 ```
 
 ---
@@ -1040,10 +1040,10 @@ boolean valid = hashingService.verify(inputPin, storedHash);
 
 ```java
 // ❌ NUNCA retornar PAN completo
-String pan = "4532123456789012";
+String pan = "4532015112830366";
 
 // ✅ SIEMPRE enmascarar
-String masked = "**** **** **** 9012";
+String masked = "**** **** **** 0366";
 ```
 
 ---
@@ -1119,7 +1119,7 @@ card.approve();
 
 // 3. Emitir (asignar PAN, CVV, PIN)
 card.issue(
-    CardNumber.of("4532123456789012"),
+    CardNumber.of("4532015112830366"),
     CVV.of("123"),
     PIN.of("1234"),
     ExpirationDate.of(12, 2028)

@@ -19,7 +19,7 @@ public class IssueCardRequest {
 
     @NotBlank(message = "El número de tarjeta es obligatorio")
     @Pattern(regexp = "^[0-9]{13,19}$", message = "Número de tarjeta inválido (13-19 dígitos)")
-    @Schema(description = "Número de tarjeta (PAN)", example = "4532123456789012")
+    @Schema(description = "Número de tarjeta (PAN)", example = "4532015112830366")
     private String cardNumber;
 
     @NotBlank(message = "El CVV es obligatorio")
