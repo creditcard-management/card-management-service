@@ -274,6 +274,25 @@ class CardStatusEndpointsTest {
     }
 
     @Test
+    void shouldNotUnblockFraudBlockedCard() throws Exception {
+        issue();
+        postJson("/activate", "{}").andExpect(status().isOk());
+        postJson("/block-fraud", "{\"reason\":\"Consumos raros\"}").andExpect(status().isOk());
+        int events = outbox.size();
+
+        postJson("/unblock", "{\"reason\":\"Falsa alarma\"}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("Business Rule Violation"));
+        putJson("/status", "{\"status\":\"ACTIVE\"}").andExpect(status().isUnprocessableEntity());
+
+        assertThat(storedCard().getStatus()).isEqualTo(CardStatus.BLOCKED_FRAUD);
+        assertThat(outbox).hasSize(events);
+
+        postJson("/cancel", "{\"reason\":\"Fraude confirmado\"}").andExpect(status().isOk());
+        assertThat(storedCard().getStatus()).isEqualTo(CardStatus.CANCELLED);
+    }
+
+    @Test
     void shouldReturn422WhenBlockingRequestedCard() throws Exception {
         mockMvc.perform(post("/api/v1/cards/" + cardId + "/block")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -290,20 +309,23 @@ class CardStatusEndpointsTest {
         postJson("/issue", issueBody(LocalDate.now().getYear() + 2)).andExpect(status().isOk());
         putJson("/status", "{\"status\":\"ACTIVE\",\"reason\":\"App\",\"performedBy\":\"cliente\"}")
                 .andExpect(status().isOk());
-        postJson("/block-fraud", "{\"reason\":\"Consumos raros\",\"performedBy\":\"antifraude\"}")
+        postJson("/block", "{\"reason\":\"Pérdida\",\"performedBy\":\"cliente\"}")
                 .andExpect(status().isOk());
-        postJson("/unblock", "{\"reason\":\"Falsa alarma\",\"performedBy\":\"antifraude\"}")
+        postJson("/unblock", "{\"reason\":\"La encontró\",\"performedBy\":\"cliente\"}")
+                .andExpect(status().isOk());
+        postJson("/block-fraud", "{\"reason\":\"Consumos raros\",\"performedBy\":\"antifraude\"}")
                 .andExpect(status().isOk());
         postJson("/cancel", "{\"reason\":\"Baja\",\"performedBy\":\"cliente\"}")
                 .andExpect(status().isOk());
 
         assertThat(outbox).extracting(EnqueuedEvent::topic).containsExactly(
                 KafkaTopics.CARD_APPROVED, KafkaTopics.CARD_ISSUED, KafkaTopics.CARD_ACTIVATED,
-                KafkaTopics.CARD_BLOCKED, KafkaTopics.CARD_UNBLOCKED, KafkaTopics.CARD_CANCELLED);
+                KafkaTopics.CARD_BLOCKED, KafkaTopics.CARD_UNBLOCKED, KafkaTopics.CARD_BLOCKED,
+                KafkaTopics.CARD_CANCELLED);
         assertThat(outbox).extracting(EnqueuedEvent::key).containsOnly(cardId);
         // Cada evento informa desde qué estado se llegó (card-lifecycle lo guarda como from_state)
         assertThat(outbox).extracting(e -> ((CardStatusChange) e.event()).getPreviousStatus())
-                .containsExactly("REQUESTED", "APPROVED", "ISSUED", "ACTIVE", "BLOCKED_FRAUD", "ACTIVE");
+                .containsExactly("REQUESTED", "APPROVED", "ISSUED", "ACTIVE", "BLOCKED", "ACTIVE", "BLOCKED_FRAUD");
 
         CardApprovedEvent approved = eventAt(0);
         assertThat(approved.getReason()).isEqualTo("Cumple");
@@ -319,14 +341,18 @@ class CardStatusEndpointsTest {
         assertThat(activated.getActivatedBy()).isEqualTo("cliente");
 
         CardBlockedEvent blocked = eventAt(3);
-        assertThat(blocked.getBlockType()).isEqualTo("FRAUD");
+        assertThat(blocked.getBlockType()).isEqualTo("NORMAL");
         assertThat(blocked.getBlockedAt()).isNotNull();
-        assertThat(blocked.getBlockedBy()).isEqualTo("antifraude");
+        assertThat(blocked.getBlockedBy()).isEqualTo("cliente");
 
         CardUnblockedEvent unblocked = eventAt(4);
-        assertThat(unblocked.getReason()).isEqualTo("Falsa alarma");
+        assertThat(unblocked.getReason()).isEqualTo("La encontró");
 
-        CardCancelledEvent cancelled = eventAt(5);
+        CardBlockedEvent fraud = eventAt(5);
+        assertThat(fraud.getBlockType()).isEqualTo("FRAUD");
+        assertThat(fraud.getBlockedBy()).isEqualTo("antifraude");
+
+        CardCancelledEvent cancelled = eventAt(6);
         assertThat(cancelled.getCancelledAt()).isNotNull();
         assertThat(cancelled.getCancelledBy()).isEqualTo("cliente");
     }

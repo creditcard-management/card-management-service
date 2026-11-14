@@ -60,6 +60,22 @@ class CardTransitionsTest {
     }
 
     @Test
+    void shouldNotUnblockFraudBlockedCard() {
+        Card card = activeCard();
+        card.blockForFraud("Consumos raros");
+
+        assertThatThrownBy(card::unblock)
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("fraude");
+        assertThatThrownBy(() -> card.updateStatus(CardStatus.ACTIVE))
+                .isInstanceOf(BusinessRuleException.class);
+
+        assertThat(card.getStatus()).isEqualTo(CardStatus.BLOCKED_FRAUD);
+        assertThat(card.getBlockReason()).isEqualTo("Consumos raros");
+        assertThat(card.getBlockedAt()).isNotNull();
+    }
+
+    @Test
     void shouldRejectUnblockingCardThatIsNotBlocked() {
         Card card = activeCard();
 

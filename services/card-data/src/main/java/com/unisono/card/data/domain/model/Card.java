@@ -251,7 +251,15 @@ public class Card {
         this.updatedAt = LocalDateTime.now();
     }
 
+    /**
+     * Desbloqueo (BLOCKED → ACTIVE). Un bloqueo por fraude no se desbloquea: la tarjeta
+     * solo puede cancelarse o vencer.
+     */
     public void unblock() {
+        if (this.status == CardStatus.BLOCKED_FRAUD) {
+            throw new BusinessRuleException(
+                    "Una tarjeta bloqueada por fraude no se puede desbloquear; solo puede cancelarse");
+        }
         if (!this.status.isBlocked()) {
             throw new BusinessRuleException(
                     String.format("La tarjeta no está bloqueada. Estado actual: %s", this.status)

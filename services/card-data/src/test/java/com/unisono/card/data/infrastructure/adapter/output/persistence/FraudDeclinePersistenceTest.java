@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Bloqueo por fraude contra PostgreSQL: el eventId, el bloqueo y el card.blocked se guardan juntos, y un evento
- * repetido no vuelve a bloquear una tarjeta que se desbloqueó.
+ * repetido no vuelve a procesarse.
  */
 class FraudDeclinePersistenceTest extends CardDataPostgresTest {
 
@@ -45,20 +45,21 @@ class FraudDeclinePersistenceTest extends CardDataPostgresTest {
     }
 
     @Test
-    void replayedEventDoesNotBlockACardThatWasUnblockedMeanwhile() {
+    void replayedEventIsNotProcessedTwice() {
         String id = save(CardStatus.ACTIVE, 12, 2030);
         String eventId = UUID.randomUUID().toString();
         service.execute(decline(eventId, id));
 
-        // Un operador revisa el caso y la desbloquea
+        // Un operador confirma el fraude y la cancela
         tx.executeWithoutResult(s -> {
             Card card = adapter.findById(CardId.of(id)).orElseThrow();
-            card.unblock();
+            card.cancel("Fraude confirmado");
             adapter.save(card);
         });
 
         assertThat(service.execute(decline(eventId, id))).isEqualTo(Outcome.DUPLICATE);
-        assertThat(status(id)).isEqualTo(CardStatus.ACTIVE);
+        assertThat(status(id)).isEqualTo(CardStatus.CANCELLED);
+        assertThat(outbox.count()).isEqualTo(1);
     }
 
     @Test

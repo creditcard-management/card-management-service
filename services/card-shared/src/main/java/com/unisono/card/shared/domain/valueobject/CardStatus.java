@@ -79,7 +79,9 @@ public enum CardStatus {
             case APPROVED -> target == ISSUED || target == CANCELLED;
             case ISSUED -> target == ACTIVE || target.isBlocked() || target == EXPIRED || target == CANCELLED;
             case ACTIVE -> target.isBlocked() || target == EXPIRED || target == CANCELLED;
-            case BLOCKED, BLOCKED_FRAUD -> target == ACTIVE || target == EXPIRED || target == CANCELLED;
+            case BLOCKED -> target == ACTIVE || target == EXPIRED || target == CANCELLED;
+            // Un bloqueo por fraude no se revierte: solo cancelar o vencer
+            case BLOCKED_FRAUD -> target == EXPIRED || target == CANCELLED;
             case REJECTED, CANCELLED, EXPIRED -> false;
         };
     }
