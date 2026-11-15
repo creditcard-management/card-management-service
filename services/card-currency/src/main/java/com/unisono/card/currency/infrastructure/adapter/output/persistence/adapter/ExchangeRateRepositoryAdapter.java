@@ -69,14 +69,43 @@ public class ExchangeRateRepositoryAdapter implements ExchangeRateRepository {
     }
 
     /**
+     * Primera clave del advisory lock: "CURR" en ASCII. Separa los locks de card-currency de cualquier otro
+     * advisory lock de la base.
+     */
+    public static final int LOCK_NAMESPACE = 0x43555252;
+
+    /** Cantidad de códigos ISO 4217 posibles: tres letras A-Z. */
+    private static final int CURRENCY_CODES = 26 * 26 * 26;
+
+    /**
      * Lock del par, el mismo para los dos sentidos (USD/ARS y ARS/USD): serializa también la regla de cotizar
      * cada par en un solo sentido.
      */
     private void lock(CurrencyPair pair) {
-        String key = pair.baseCode().compareTo(pair.quoteCode()) < 0
-                ? pair.baseCode() + "/" + pair.quoteCode()
-                : pair.quoteCode() + "/" + pair.baseCode();
-        jpaRepository.lockPair("exchange_rates:" + key);
+        jpaRepository.lockPair(LOCK_NAMESPACE, pairLockKey(pair));
+    }
+
+    /**
+     * Segunda clave del advisory lock: cada código de 3 letras es un número en base 26 (0 a 17.575) y el par, con
+     * los códigos ordenados, {@code menor × 17.576 + mayor}. Es distinto para cada par (sin colisiones, a diferencia
+     * de un hash), igual para los dos sentidos y entra en un {@code int} (máximo 308.915.775).
+     */
+    public static int pairLockKey(CurrencyPair pair) {
+        int base = codeNumber(pair.baseCode());
+        int quote = codeNumber(pair.quoteCode());
+        return Math.min(base, quote) * CURRENCY_CODES + Math.max(base, quote);
+    }
+
+    private static int codeNumber(String code) {
+        int n = 0;
+        for (int i = 0; i < code.length(); i++) {
+            char c = code.charAt(i);
+            if (code.length() != 3 || c < 'A' || c > 'Z') {
+                throw new IllegalArgumentException("Currency code must be 3 letters A-Z: " + code);
+            }
+            n = n * 26 + (c - 'A');
+        }
+        return n;
     }
 
     @Override

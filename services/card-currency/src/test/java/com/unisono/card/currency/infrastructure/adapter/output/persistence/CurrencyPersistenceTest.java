@@ -192,4 +192,21 @@ class CurrencyPersistenceTest {
         Optional<ExchangeRate> missing = tx.execute(status -> rates.findByIdForUpdate("missing"));
         assertThat(missing).isEmpty();
     }
+
+    @Test
+    void lockUsesTheCardCurrencyNamespaceAndTheSameKeyForBothDirections() {
+        Integer locks = tx.execute(status -> {
+            rates.findOpenForUpdate(USD_ARS.inverse());
+            // Mismo backend: la consulta ve el lock de su propia transacción
+            return jdbc.queryForObject("""
+                    SELECT count(*) FROM pg_locks
+                    WHERE locktype = 'advisory' AND pid = pg_backend_pid()
+                      AND classid = ? AND objid = ? AND objsubid = 2
+                    """, Integer.class,
+                    ExchangeRateRepositoryAdapter.LOCK_NAMESPACE,
+                    ExchangeRateRepositoryAdapter.pairLockKey(USD_ARS));
+        });
+
+        assertThat(locks).isEqualTo(1);
+    }
 }
