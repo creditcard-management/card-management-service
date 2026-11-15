@@ -1,0 +1,33 @@
+# =============================================
+# Card Currency Module Configuration
+# Module: card-currency
+# =============================================
+
+spring:
+  application:
+    name: card-currency-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/card_management_db
+    username: postgres
+    password: postgres
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      pool-name: CurrencyHikariCP
+
+server:
+  port: 8086
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+    include-exception: false
+
+logging:
+  level:
+    root: INFO
+    com.unisono.card.currency: DEBUG
+  file:
+    name: logs/card-currency.log

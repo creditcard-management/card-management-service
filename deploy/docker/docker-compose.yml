@@ -14,6 +14,7 @@
 #   - card-limits-service     → Puerto 8082
 #   - card-lifecycle-service  → Puerto 8083
 #   - payment-processing      → Puerto 8085
+#   - card-currency-service   → Puerto 8086
 #
 # Módulos que NO son servicios (librerías Maven, sin contenedor propio):
 #   - card-shared             → dependencia interna, se incluye en el build de otros módulos
@@ -206,6 +207,29 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8085/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  card-currency-service:
+    build:
+      context: ../..
+      dockerfile: services/card-currency/Dockerfile
+    container_name: card-currency-service
+    environment:
+      SPRING_PROFILES_ACTIVE: card-currency
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/card_management_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SERVER_PORT: 8086
+    ports:
+      - "8086:8086"
+    networks:
+      - card-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8086/actuator/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

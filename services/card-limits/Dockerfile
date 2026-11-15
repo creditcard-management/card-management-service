@@ -7,6 +7,7 @@ FROM maven:3.9.6-eclipse-temurin-17 AS builder
 WORKDIR /build
 
 COPY pom.xml .
+COPY services/card-currency/pom.xml      services/card-currency/
 COPY services/card-data/pom.xml          services/card-data/
 COPY services/card-events/pom.xml        services/card-events/
 COPY services/card-lifecycle/pom.xml     services/card-lifecycle/

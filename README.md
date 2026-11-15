@@ -23,6 +23,7 @@ Backend de gestión de tarjetas de crédito: alta y ciclo de vida de la tarjeta,
 | `card-limits` | Servicio | 8082 | Aggregate `CreditLimit`: límites, consumo y liberación de crédito, validación de compras | [LIMITS.md](docs/technical/LIMITS.md) |
 | `card-lifecycle` | Servicio | 8083 | Orquesta las transiciones de estado con una state machine y guarda el historial | [LIFECYCLE.md](docs/technical/LIFECYCLE.md) |
 | `payment-processing` | Servicio | 8085 | Aggregate `Transaction`: compras, adelantos, preautorización, reversos, devoluciones y liquidación | [PAYMENT.md](docs/technical/PAYMENT.md) |
+| `card-currency` | Servicio | 8086 | Monedas aceptadas, cotizaciones por par con vigencia y conversión de montos | [README](services/card-currency/README.md) |
 
 El código de cada módulo está en `services/<módulo>`.
 
@@ -43,6 +44,7 @@ flowchart LR
 - **card-data** es dueño de la tarjeta. card-lifecycle valida cada transición y después llama a card-data, que publica el evento `card.*` por un outbox transaccional.
 - **card-lifecycle** arma el historial consumiendo esos eventos, así que depende de Kafka para mostrarlo.
 - **payment-processing** valida la tarjeta en card-data y el crédito en card-limits antes de autorizar. Un rechazo por fraude publica `payment.processing.declined` y card-data bloquea la tarjeta.
+- **card-currency** todavía no está integrado: payment-processing sigue recibiendo la tasa de cambio en el request.
 - Todos los servicios comparten la base `card_management_db`. El esquema se administra en otro repo: [card-management-database](https://github.com/creditcard-managment/card-management-database).
 
 ## Levantar el stack
@@ -54,7 +56,7 @@ Requisitos: Docker con Compose v2, y JDK 17 con Maven 3.9 si vas a compilar fuer
    docker compose up -d postgres pgadmin
    docker compose up flyway
    ```
-2. **Kafka y los cuatro servicios**, desde este repo:
+2. **Kafka y los cinco servicios**, desde este repo:
    ```bash
    docker compose -f deploy/docker/docker-compose.yml up -d --build
    ```
@@ -63,7 +65,7 @@ Requisitos: Docker con Compose v2, y JDK 17 con Maven 3.9 si vas a compilar fuer
    ```bash
    docker exec -i card-db-postgres psql -U postgres -d card_management_db < docs/postman/dev-seed-merchants.sql
    ```
-4. **Verificar:** `curl localhost:8081/actuator/health` (y 8082, 8083, 8085).
+4. **Verificar:** `curl localhost:8081/actuator/health` (y 8082, 8083, 8085, 8086).
 
 Las claves de cifrado del compose son de desarrollo. Se sobrescriben con variables de entorno (`ENCRYPTION_KEY_K1`, `PIN_ENCRYPTION_KEY_V1`, …), ver [DATA.md](docs/technical/DATA.md).
 
@@ -78,7 +80,7 @@ Los tests de persistencia usan Testcontainers, así que necesitan Docker.
 
 ## Probar la API
 
-- **Swagger UI:** `http://localhost:<puerto>/swagger-ui.html` en cada servicio (8081, 8082, 8083, 8085).
+- **Swagger UI:** `http://localhost:<puerto>/swagger-ui.html` en cada servicio (8081, 8082, 8083, 8085, 8086).
 - **Postman:** [`docs/postman/Card Management System.postman_collection.json`](docs/postman/Card%20Management%20System.postman_collection.json). La carpeta *0. Flujo punta a punta* recorre alta, aprobación, límite, emisión, activación, pagos, bloqueos y cancelación con el Collection Runner. Sin Postman instalado:
   ```bash
   docker run --rm --network host -v "$PWD/docs/postman:/etc/newman" postman/newman:6-alpine \

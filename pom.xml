@@ -56,6 +56,7 @@
     <modules>
         <module>services/card-shared</module>
         <module>services/card-events</module>
+        <module>services/card-currency</module>
         <module>services/card-data</module>
         <module>services/card-limits</module>
         <module>services/card-lifecycle</module>
@@ -96,7 +97,11 @@
                 <artifactId>payment-processing</artifactId>
                 <version>${project.version}</version>
             </dependency>
-
+            <dependency>
+                <groupId>com.unisono.card</groupId>
+                <artifactId>card-currency</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
 
 
