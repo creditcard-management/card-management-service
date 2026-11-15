@@ -17,12 +17,28 @@ class SupportedCurrencyTest {
 
     @Test
     void registersActiveWithIsoData() {
-        SupportedCurrency jpy = SupportedCurrency.register("jpy", " Yen ", T0);
+        SupportedCurrency brl = SupportedCurrency.register("brl", " Real ", T0);
 
-        assertThat(jpy.getCode()).isEqualTo("JPY");
-        assertThat(jpy.getName()).isEqualTo("Yen");
-        assertThat(jpy.getFractionDigits()).isZero();
-        assertThat(jpy.isActive()).isTrue();
+        assertThat(brl.getCode()).isEqualTo("BRL");
+        assertThat(brl.getName()).isEqualTo("Real");
+        assertThat(brl.getFractionDigits()).isEqualTo(2);
+        assertThat(brl.isActive()).isTrue();
+    }
+
+    @Test
+    void rejectsCurrenciesWithoutTwoDecimals() {
+        assertThatThrownBy(() -> SupportedCurrency.register("JPY", "Yen", T0))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("0 decimals");
+        assertThatThrownBy(() -> SupportedCurrency.register("BHD", "Dinar bareiní", T0))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("3 decimals");
+    }
+
+    @Test
+    void restoreDoesNotCheckDecimals() {
+        // Una moneda cargada antes de la regla (o a mano en la base) se sigue pudiendo leer
+        assertThat(SupportedCurrency.restore("JPY", "Yen", true, T0, T0).getFractionDigits()).isZero();
     }
 
     @Test

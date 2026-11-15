@@ -156,4 +156,40 @@ class CurrencyPersistenceTest {
         assertThatThrownBy(() -> rates.save(rate("1100", T0.plusSeconds(60))))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
+
+    @Test
+    void cancelOpenScheduledRateDeletesItAndReopensThePrevious() {
+        ExchangeRate current = rates.save(rate("1000", T0));
+        ExchangeRate scheduled = rate("1100", T0.plusSeconds(3600));
+        tx.executeWithoutResult(status -> {
+            ExchangeRate open = rates.findOpenForUpdate(USD_ARS).orElseThrow();
+            open.supersededBy(scheduled);
+            rates.save(open);
+            rates.save(scheduled);
+        });
+
+        // Lo mismo que ExchangeRateService.cancelScheduled: DELETE antes de reabrir (índice único)
+        tx.executeWithoutResult(status -> {
+            ExchangeRate locked = rates.findByIdForUpdate(scheduled.getRateId()).orElseThrow();
+            ExchangeRate previous = rates.findEndingAt(USD_ARS, locked.getValidFrom()).orElseThrow();
+            assertThat(previous.getRateId()).isEqualTo(current.getRateId());
+            rates.delete(locked);
+            previous.resumeAfter(locked);
+            rates.save(previous);
+        });
+
+        assertThat(rates.findByIdForUpdate(scheduled.getRateId())).isEmpty();
+        Optional<ExchangeRate> open = tx.execute(status -> rates.findOpenForUpdate(USD_ARS));
+        assertThat(open).get().extracting(ExchangeRate::getRateId).isEqualTo(current.getRateId());
+    }
+
+    @Test
+    void existsForPairDistinguishesDirections() {
+        rates.save(rate("1000", T0));
+
+        assertThat(rates.existsForPair(USD_ARS)).isTrue();
+        assertThat(rates.existsForPair(USD_ARS.inverse())).isFalse();
+        Optional<ExchangeRate> missing = tx.execute(status -> rates.findByIdForUpdate("missing"));
+        assertThat(missing).isEmpty();
+    }
 }

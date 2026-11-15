@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -47,8 +48,15 @@ public class ExchangeRateController {
         return ResponseEntity.status(HttpStatus.CREATED).body(mapper.toResponse(exchangeRates.publish(command)));
     }
 
+    @DeleteMapping("/{rateId}")
+    @Operation(summary = "Cancelar una cotización programada (que todavía no empezó); la anterior del par sigue vigente")
+    public ResponseEntity<Void> cancelScheduled(@PathVariable String rateId) {
+        exchangeRates.cancelScheduled(rateId);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/{base}/{quote}")
-    @Operation(summary = "Cotización vigente del par (o la vigente en `at`)")
+    @Operation(summary = "Cotización vigente del par (o la vigente en `at`); las dos monedas tienen que estar activas")
     public ExchangeRateResponse current(@PathVariable String base, @PathVariable String quote,
                                         @RequestParam(required = false)
                                         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant at) {

@@ -73,4 +73,44 @@ class ExchangeRateTest {
         assertThatThrownBy(() -> ExchangeRate.restore("r1", USD_ARS, BigDecimal.ONE, T0, T0, RateSource.MANUAL, T0))
                 .isInstanceOf(InvalidValueObjectException.class);
     }
+
+    @Test
+    void onlyScheduledRatesCanBeCancelled() {
+        ExchangeRate scheduled = rate("1000", T0.plusSeconds(60));
+
+        scheduled.ensureCancellable(T0);
+        assertThatThrownBy(() -> scheduled.ensureCancellable(T0.plusSeconds(60)))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("already started");
+    }
+
+    @Test
+    void resumeAfterTakesTheValidityOfTheCancelledRate() {
+        ExchangeRate current = rate("1000", T0);
+        ExchangeRate middle = rate("1100", T0.plusSeconds(600));
+        ExchangeRate last = rate("1200", T0.plusSeconds(1200));
+        current.supersededBy(middle);
+        middle.supersededBy(last);
+
+        current.resumeAfter(middle);
+        assertThat(current.getValidTo()).isEqualTo(T0.plusSeconds(1200));
+
+        ExchangeRate open = rate("900", T0);
+        ExchangeRate scheduled = rate("950", T0.plusSeconds(60));
+        open.supersededBy(scheduled);
+        open.resumeAfter(scheduled);
+        assertThat(open.isOpen()).isTrue();
+    }
+
+    @Test
+    void resumeAfterRequiresTheAdjacentRateOfThePair() {
+        ExchangeRate current = rate("1000", T0);
+        ExchangeRate other = rate("1100", T0.plusSeconds(600));
+
+        assertThatThrownBy(() -> current.resumeAfter(other)).isInstanceOf(BusinessRuleException.class);
+        ExchangeRate eurArs = ExchangeRate.publish(CurrencyPair.of("EUR", "ARS"), BigDecimal.TEN,
+                T0.plusSeconds(600), RateSource.MANUAL, T0);
+        current.supersededBy(other);
+        assertThatThrownBy(() -> current.resumeAfter(eurArs)).isInstanceOf(BusinessRuleException.class);
+    }
 }

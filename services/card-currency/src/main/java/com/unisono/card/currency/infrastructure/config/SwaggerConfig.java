@@ -36,7 +36,7 @@ public class SwaggerConfig {
         Info info = new Info()
                 .title("Currency Service API")
                 .version("1.0.0")
-                .description("API REST para gestión de límites de crédito - Módulo card.currency")
+                .description("API REST de monedas, cotizaciones y conversión de montos - Módulo card-currency")
                 .contact(contact)
                 .license(license);
 

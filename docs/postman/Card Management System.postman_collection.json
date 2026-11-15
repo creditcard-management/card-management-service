@@ -3185,6 +3185,51 @@
           ]
         },
         {
+          "name": "Dar de alta una moneda sin 2 decimales → 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/currencies",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "currencies"
+              ]
+            },
+            "description": "JPY no tiene decimales y los montos del sistema usan siempre 2: solo se aceptan monedas de 2 decimales.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"JPY\",\n  \"name\": \"Yen japonés\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Activar moneda",
           "request": {
             "method": "PUT",
@@ -3377,7 +3422,117 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('scheduled_rate_id', pm.response.json().rateId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancelar cotización programada",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/{{scheduled_rate_id}}",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "{{scheduled_rate_id}}"
+              ]
+            },
+            "description": "Borra la cotización programada con \"Programar cotización a futuro\" (todavía no empezó) y la anterior de EUR/USD, si la hay, vuelve a quedar abierta. Una cotización que ya empezó no se puede cancelar (422)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancelar una cotización vigente → 422",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/{{usd_rate_id}}",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "{{usd_rate_id}}"
+              ]
+            },
+            "description": "La cotización USD/ARS publicada con \"Publicar cotización\" ya rige: solo se puede reemplazar con una nueva."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publicar el par en sentido inverso → 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates"
+              ]
+            },
+            "description": "USD/ARS ya está cotizado: cada par se cotiza en un solo sentido. ARS → USD se convierte con la inversa.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseCurrency\": \"ARS\",\n  \"quoteCurrency\": \"USD\",\n  \"rate\": 0.00087\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
                 ]
               }
             }
@@ -3743,6 +3898,10 @@
     },
     {
       "key": "effective_from",
+      "value": ""
+    },
+    {
+      "key": "scheduled_rate_id",
       "value": ""
     }
   ]

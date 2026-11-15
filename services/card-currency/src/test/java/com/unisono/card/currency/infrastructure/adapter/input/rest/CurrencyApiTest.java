@@ -14,6 +14,7 @@ import com.unisono.card.currency.domain.port.input.ExchangeRateUseCase;
 import com.unisono.card.currency.domain.port.input.ExchangeRateUseCase.PublishRateCommand;
 import com.unisono.card.currency.domain.port.input.ManageCurrenciesUseCase;
 import com.unisono.card.shared.domain.exception.BusinessRuleException;
+import com.unisono.card.shared.domain.exception.NotFoundException;
 import com.unisono.card.shared.domain.valueobject.Money;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -190,5 +192,26 @@ class CurrencyApiTest {
                         .content("{\"amount\":1,\"fromCurrency\":\"USD\",\"toCurrency\":\"BRL\"}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.message").value("Currency not supported: BRL"));
+    }
+
+    @Test
+    void cancelScheduledRate() throws Exception {
+        when(exchangeRates.cancelScheduled("rate-1")).thenReturn(usdArs("1000"));
+        when(exchangeRates.cancelScheduled("started")).thenThrow(new BusinessRuleException("already started"));
+        when(exchangeRates.cancelScheduled("missing")).thenThrow(new NotFoundException("Exchange rate", "missing"));
+
+        mvc.perform(delete("/api/v1/exchange-rates/rate-1")).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/v1/exchange-rates/started")).andExpect(status().isUnprocessableEntity());
+        mvc.perform(delete("/api/v1/exchange-rates/missing")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void registerCurrencyWithoutTwoDecimalsIs422() throws Exception {
+        when(currencies.register("JPY", "Yen"))
+                .thenThrow(new BusinessRuleException("Currency JPY uses 0 decimals"));
+
+        mvc.perform(post("/api/v1/currencies").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"JPY\",\"name\":\"Yen\"}"))
+                .andExpect(status().isUnprocessableEntity());
     }
 }

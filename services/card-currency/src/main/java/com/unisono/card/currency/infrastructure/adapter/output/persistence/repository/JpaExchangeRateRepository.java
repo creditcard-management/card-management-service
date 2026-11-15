@@ -36,6 +36,19 @@ public interface JpaExchangeRateRepository extends JpaRepository<ExchangeRateEnt
     Optional<ExchangeRateEntity> findValidAt(@Param("base") String base, @Param("quote") String quote,
                                              @Param("at") Instant at);
 
+    /**
+     * Par de una cotización como {@code "USD/ARS"}. Es una proyección escalar (no carga la entidad) para poder
+     * tomar el lock del par antes de leer la cotización.
+     */
+    @Query(value = "SELECT base_currency || '/' || quote_currency FROM exchange_rates WHERE rate_id = :rateId",
+            nativeQuery = true)
+    Optional<String> findPairOf(@Param("rateId") String rateId);
+
+    Optional<ExchangeRateEntity> findByBaseCurrencyAndQuoteCurrencyAndValidTo(String base, String quote,
+                                                                            Instant validTo);
+
+    boolean existsByBaseCurrencyAndQuoteCurrency(String base, String quote);
+
     List<ExchangeRateEntity> findByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc(String base, String quote,
                                                                                    Pageable pageable);
 }
