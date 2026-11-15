@@ -70,8 +70,12 @@ public class TransactionEntity {
     @Column(name = "local_currency", length = 3)
     private String localCurrency;
 
-    @Column(name = "exchange_rate", precision = 10, scale = 6)
+    @Column(name = "exchange_rate", precision = 19, scale = 8)
     private BigDecimal exchangeRate;
+
+    // Cotización de card-currency usada para convertir (V20)
+    @Column(name = "exchange_rate_id", length = 36)
+    private String exchangeRateId;
 
     // ========== Card Information (PCI Compliant - Tokenized) ==========
 

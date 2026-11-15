@@ -36,6 +36,7 @@ public class TransactionResponse {
     private BigDecimal localAmount;
     private String localCurrency;
     private BigDecimal exchangeRate;
+    private String exchangeRateId;
 
     // Card information (masked)
     private String cardLastFour;

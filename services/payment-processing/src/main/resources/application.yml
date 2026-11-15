@@ -76,11 +76,14 @@ services:
 
   card-limits:
     url: ${CARD_LIMITS_SERVICE_URL:http://localhost:8082}
+  # Conversión a la moneda del límite cuando el pago viene en otra moneda
+  card-currency:
+    url: ${CARD_CURRENCY_SERVICE_URL:http://localhost:8086}
 
   # Antifraude y autorizador no existen en el repo: los puertos no chocan con los de los otros servicios.
   # Si no responden, el antifraude usa su cálculo local y el autorizador solo se llama con simulate: false
   fraud-detection:
-    url: ${FRAUD_DETECTION_SERVICE_URL:http://localhost:8086}
+    url: ${FRAUD_DETECTION_SERVICE_URL:http://localhost:8088}
 
   authorization:
     url: ${AUTHORIZATION_SERVICE_URL:http://localhost:8087}

@@ -11,7 +11,7 @@
 | Base de datos | PostgreSQL — tablas `transactions`, `payment_outbox_events`, `payment_credit_operations`; lee `merchants` y `payment_terminals` |
 | Mensajería | Kafka (productor, vía outbox) — topics `payment.*` |
 | Dependencias internas | `card-shared` (`Money`, `CardId`, `ExpirationDate`, …), `card-events` (`DomainEvent`) |
-| Integraciones REST | card-data, card-limits, servicio antifraude y autorizador (ver §7) |
+| Integraciones REST | card-data, card-limits, card-currency, servicio antifraude y autorizador (ver §7) |
 | Perfiles | Ninguno por defecto (docker-compose tampoco usa); opcionales `dev` y `prod` |
 | Swagger UI | `/swagger-ui.html` |
 
@@ -95,7 +95,7 @@ com.unisono.card.payment
 | `cardData` | `CardData` | Token del PAN, últimos 4, titular, vencimiento |
 | `merchantInfo` | `MerchantInfo` | Id, nombre, MCC, ciudad, país |
 | `type` | `TransactionType` | `PURCHASE`, `REFUND`, … |
-| `amount` | `TransactionAmount` | Monto y, opcionalmente, monto local con tipo de cambio |
+| `amount` | `TransactionAmount` | Monto en la moneda del pago y, si difiere de la del límite, monto convertido, tasa y cotización de card-currency |
 | `paymentMethod` | `PaymentMethod` | `CHIP`, `CONTACTLESS`, … |
 | `status` | `TransactionStatus` | Estado (inicia en `PENDING`) |
 | `authorizationCode` | `AuthorizationCode` | Código, fecha y response code ISO 8583. En un rechazo guarda el código declinado (`DECLINED-…`) con el response code del motivo |
@@ -153,7 +153,7 @@ stateDiagram-v2
 
 | Tipo | Reglas / valores |
 |---|---|
-| `TransactionAmount` | Monto > 0. Con conversión: `localAmount` + `exchangeRate` > 0. `getEffectiveAmount()` devuelve el local si hay conversión. |
+| `TransactionAmount` | Monto > 0. Con conversión: `localAmount` (en la moneda del límite) + `exchangeRate` > 0 + `exchangeRateId` (cotización de card-currency). `getEffectiveAmount()` devuelve el local si hay conversión: es lo que se consume y restaura en card-limits. |
 | `CardData` | Token obligatorio, últimos 4 = 4 dígitos, vencimiento obligatorio. `getMaskedCardNumber()` → `************1234`. |
 | `MerchantInfo` | Id y nombre obligatorios; MCC de 4 dígitos y país ISO-3166 alpha-2 si se informan. |
 | `AuthorizationCode` | `approved(code)` → response `00`; `declined(rc)` → `DECLINED-xxxxxx`. |
@@ -182,6 +182,7 @@ sequenceDiagram
     participant DS as PaymentDomainService
     participant CD as card-data
     participant CL as card-limits
+    participant CC as card-currency
     participant FR as Antifraude
     participant AU as Autorizador
     participant DB as PostgreSQL
@@ -189,6 +190,8 @@ sequenceDiagram
     participant K as Kafka
 
     C->>AS: POST /payments/purchase
+    AS->>CL: GET /card/{cardId}: moneda del límite
+    AS->>CC: POST /exchange-rates/convert (solo si la moneda del pago es otra)
     AS->>AS: mapear + validar monto y método
     AS->>DS: processPayment(...)
     DS->>CD: GET /cards/{id}: ¿existe? (si no → 400)
@@ -211,6 +214,7 @@ sequenceDiagram
 
 Puntos clave:
 
+- **Moneda:** el pago se cobra en la moneda del límite de crédito de la tarjeta. Si el request viene en otra, card-currency lo convierte con la cotización vigente y la transacción guarda el monto original, el convertido, la tasa y el `exchangeRateId`. Validación, consumo y restauración de crédito usan el monto convertido. El cliente ya no puede mandar `localAmount`, `localCurrency` ni `exchangeRate`: si los manda, se ignoran. Si la moneda no está activa en card-currency o no hay cotización para el par → **422** `CURRENCY_NOT_SUPPORTED`, sin registrar. Si la tarjeta no tiene límite, no se convierte y el chequeo de crédito la rechaza con `51`.
 - **Errores del request** (no se registran): tarjeta inexistente, comercio inexistente o no `ACTIVE`, MCC inválido, terminal desconocida, monto o método inválidos. Cortan con una excepción antes de crear la transacción (400). No se puede guardar una transacción así porque `card_id` y `merchant_id` son FK.
 - **Rechazos** (se registran): desde que se crea la transacción, cualquier rechazo la pasa a **`DECLINED`** con `decline(reason, declinedCode)`. Se guarda, se publica `PaymentInitiated` + `PaymentDeclined` y el controller responde **402** con el `PaymentResponse` (`approved=false`, `declineReason`, `responseCode`):
 
@@ -229,7 +233,7 @@ Puntos clave:
 - El score de fraude se calcula **una sola vez** (una llamada al servicio externo). Ese valor es el que se evalúa (`isSuspicious(tx, score)`) y el que queda guardado, también en un rechazo.
 - **CVV:** en `ONLINE` y `MANUAL` es obligatorio y se verifica contra card-data (`POST /cards/{id}/validate-cvv`) después del estado de la tarjeta. Si se envía en otro método, también se verifica. Incorrecto o faltante → `DECLINED` `N7`.
 - El crédito se **consume** en card-limits al aprobar (baja el disponible y los acumulados diario y mensual), después de que el autorizador aprobó. Una transacción rechazada nunca lo consume. Un reverso o una devolución lo **restauran** con `restore-credit` (disponible y, si la original es del día o del mes en curso, el cupo diario y mensual). Si la original fue un adelanto, se manda `cashAdvance: true` y card-limits también devuelve lo usado en adelantos, que son acumulativos contra su tope ([LIMITS.md §4.4](LIMITS.md)). Liquidar no lo toca.
-- Si card-data o card-limits no responden, el pago no se procesa: **503** `SERVICE_UNAVAILABLE`.
+- Si card-data, card-limits o card-currency no responden, el pago no se procesa: **503** `SERVICE_UNAVAILABLE`.
 - Los eventos se guardan en el **outbox** con la transacción y se publican después del commit. El consumo de crédito queda atado a esa misma transacción: si no confirma, se deshace en card-limits (§4.7).
 
 ### 4.2 Adelanto en efectivo
@@ -259,9 +263,11 @@ Después sigue el mismo flujo que la compra, con `merchantName = "ATM Cash Advan
    - Si no falta nada → 400 `Transaction is already fully refunded`.
    - **Total:** el monto tiene que ser exactamente lo que falta. Sin devoluciones previas es el original; después de una parcial, es el resto.
    - **Parcial:** menor o igual a lo que falta.
+   - El monto va **en la moneda de la original** (otra moneda → 400). Lo que falta se calcula en esa moneda.
 4. Valida la tarjeta.
 5. Crea una transacción `REFUND` **vinculada a la original** (`originalTransactionId`) y la aprueba con `approveRefund()` (`PENDING → APPROVED`, sin autorizador).
-6. Llama a card-limits `restore-credit` con la fecha de la original (`cashAdvance: true` si la original fue un adelanto) → guarda → publica `RefundInitiated` y `RefundProcessed`.
+6. Si la original se convirtió, la devolución usa **la tasa de la original, no la de hoy**: restaura exactamente el crédito que se consumió. Una parcial restaura `monto × tasa` (HALF_UP), nunca más de lo que queda consumido. Devolver todo lo que falta restaura todo lo que queda, así el redondeo no deja centavos. La devolución guarda la misma tasa y `exchangeRateId`.
+7. Llama a card-limits `restore-credit` por el monto en la moneda del límite, con la fecha de la original (`cashAdvance: true` si la original fue un adelanto) → guarda → publica `RefundInitiated` y `RefundProcessed`.
 
 La devolución queda `APPROVED` y se liquida como cualquier otra transacción. `RefundResponse` y `TransactionResponse` informan `originalTransactionId`.
 
@@ -341,7 +347,7 @@ Cancelar es seguro en todos los casos. Si la operación se aplicó, card-limits 
 | `expirationDate` | `MM/YYYY` (año 20xx) |
 | `amount` | 0,01 – 50.000,00 |
 | `currency` | 3 caracteres |
-| `localAmount`, `localCurrency`, `exchangeRate` | Opcionales (conversión de moneda) |
+| `currency` ≠ moneda del límite | card-currency convierte. `localAmount`, `localCurrency` y `exchangeRate` ya no se aceptan (se ignoran) |
 | `merchantCategoryCode` | 4 dígitos (opcional) |
 | `merchantCountry` | ISO alpha-2 (opcional) |
 | `paymentMethod` | Obligatorio (enum) |
@@ -424,7 +430,8 @@ Campos: `cardId`, `cardNumberToken`, `lastFourDigits`, `expirationDate`, `amount
 | `AuthorizationFailedException` | 402 | `AUTHORIZATION_FAILED` |
 | `FraudDetectedException` | 403 | `FRAUD_DETECTED` |
 | `MerchantValidationException` | 400 | `MERCHANT_VALIDATION_FAILED` (comercio inexistente o no `ACTIVE`, terminal desconocida, MCC inválido) |
-| `ExternalServiceException` | 503 | `SERVICE_UNAVAILABLE` (card-data o card-limits no responden o responden 5xx) |
+| `CurrencyConversionException` | 422 | `CURRENCY_NOT_SUPPORTED` (card-currency no cotiza el par o la moneda no está activa) |
+| `ExternalServiceException` | 503 | `SERVICE_UNAVAILABLE` (card-data, card-limits o card-currency no responden o responden 5xx) |
 | `ValidationException` de `card-shared` (incluye `InvalidValueObjectException`, p. ej. `expirationDate` mal formado o moneda inválida) | 400 | `INVALID_VALUE` |
 | `BusinessRuleException` de `card-shared` (p. ej. monedas distintas en `Money`) | 422 | `BUSINESS_RULE_VIOLATION` |
 | Otra `PaymentException` | 500 | `PAYMENT_ERROR` |
@@ -467,9 +474,10 @@ En compras y adelantos, `InsufficientFundsException`, `FraudDetectedException`, 
 | Puerto | Destino | Llamadas | URL por defecto (`services.*`) |
 |---|---|---|---|
 | `CardValidationPort` | card-data | `GET /api/v1/cards/{cardId}` → `status`, `isBlocked`, `isExpired`; `POST /api/v1/cards/{cardId}/validate-pin` con `{ pinBlock, pinKeyId }` → `valid` (adelantos); `POST …/validate-cvv` → `valid` (`ONLINE`/`MANUAL`) | `CARD_DATA_SERVICE_URL` = `http://localhost:8081` |
-| `CreditLimitPort` (`SagaCreditLimitPort` → `CreditLimitAdapter`) | card-limits | `POST /api/v1/credit-limits/validate/purchase` · `…/validate/cash-advance`; `GET …/card/{cardId}` (resuelve el `creditLimitId`); `POST …/{creditLimitId}/consume-purchase` · `…/consume-cash-advance` · `…/restore-credit` (reversos y devoluciones, con `cashAdvance` según el tipo de la original), con `operationId`; `POST …/{creditLimitId}/operations/{operationId}/cancel` (compensación, §4.7) | `CARD_LIMITS_SERVICE_URL` = `http://localhost:8082` |
+| `CreditLimitPort` (`SagaCreditLimitPort` → `CreditLimitAdapter`) | card-limits | `POST /api/v1/credit-limits/validate/purchase` · `…/validate/cash-advance`; `GET …/card/{cardId}` (resuelve el `creditLimitId` y la moneda del límite); `POST …/{creditLimitId}/consume-purchase` · `…/consume-cash-advance` · `…/restore-credit` (reversos y devoluciones, con `cashAdvance` según el tipo de la original), con `operationId`; `POST …/{creditLimitId}/operations/{operationId}/cancel` (compensación, §4.7) | `CARD_LIMITS_SERVICE_URL` = `http://localhost:8082` |
+| `CurrencyConversionPort` (`CurrencyConversionAdapter`) | card-currency | `POST /api/v1/exchange-rates/convert` con `{ amount, fromCurrency, toCurrency }` → monto convertido, `appliedRate`, `rateId` | `CARD_CURRENCY_SERVICE_URL` = `http://localhost:8086` |
 | `MerchantValidationPort` | Base compartida | `merchants` (existe y `status = 'ACTIVE'`) y `payment_terminals` (terminal `ACTIVE` → `merchant_id`), por JPA de solo lectura | — |
-| `FraudCheckPort` | Servicio antifraude | `/api/v1/fraud/*` | `FRAUD_DETECTION_SERVICE_URL` = `http://localhost:8086` (no existe en el repo; si no responde se usa el cálculo local) |
+| `FraudCheckPort` | Servicio antifraude | `/api/v1/fraud/*` | `FRAUD_DETECTION_SERVICE_URL` = `http://localhost:8088` (no existe en el repo; si no responde se usa el cálculo local) |
 | `AuthorizationPort` | Autorizador | `/api/v1/authorization/*` | `AUTHORIZATION_SERVICE_URL` = `http://localhost:8087` (no existe en el repo); simulado por defecto |
 
 No hay un servicio de comercios: `merchants` y `payment_terminals` (V4) se cargan directamente en la base. `MerchantEntity` y `PaymentTerminalEntity` son `@Immutable` y solo mapean las columnas que se leen.
@@ -489,6 +497,9 @@ No hay un servicio de comercios: `merchants` y `payment_terminals` (V4) se carga
 | CVV | `valid=false` | `DECLINED` `N7` (402) |
 | CVV | 422 (tarjeta bloqueada) | `DECLINED` `62` (402) |
 | CVV | Error de red o 5xx | 503 `SERVICE_UNAVAILABLE` |
+| Moneda del límite | 404 (sin límite asignado) | No se convierte; el chequeo de crédito declina con `51` |
+| Conversión (card-currency) | 404 (sin cotización) o 422 (moneda no soportada) | 422 `CURRENCY_NOT_SUPPORTED`, sin registrar |
+| Conversión (card-currency) | Error de red, 5xx u otro 4xx | 503 `SERVICE_UNAVAILABLE` |
 | Validación de crédito | `approved=false` | `DECLINED` `51` (402) con el motivo |
 | Validación de crédito | 404 (sin límite asignado) | `DECLINED` `51` (402) (`Card has no credit limit`) |
 | Consumo de crédito | 400 / 422 (el disponible cambió entre la validación y el consumo) | Se anula la autorización y `DECLINED` `51` (402) |
@@ -537,7 +548,7 @@ El esquema se crea con Flyway en el repo `card-management-database` (`migrations
 
 - **Identificación:** `transaction_id` (UUID PK), `card_id`, `merchant_id`.
 - **Tipo y estado:** `transaction_type`, `transaction_status`, `payment_method`.
-- **Montos:** `amount`, `currency`, `local_amount`, `local_currency`, `exchange_rate`.
+- **Montos:** `amount`, `currency`, `local_amount`, `local_currency`, `exchange_rate` (`NUMERIC(19,8)` desde V20) y `exchange_rate_id` (V20, cotización de card-currency).
 - **Tarjeta:** `card_number_token`, `card_last_four`, `card_holder_name`, `expiration_date`.
 - **Autorización:** `authorization_code`, `authorization_date`, `authorization_response_code`.
 - **Comercio:** `merchant_category_code`, `merchant_name`, `merchant_city`, `merchant_country`.
@@ -593,7 +604,7 @@ El esquema se crea con Flyway en el repo `card-management-database` (`migrations
 
 ### 9.3 Docker
 
-`services/payment-processing/Dockerfile` (multi-stage) y servicio `payment-processing-service` en compose (sin perfil: toda la configuración está en `application.yml`; los perfiles opcionales son `dev` y `prod`): puerto `8085`, `KAFKA_BOOTSTRAP_SERVERS=kafka:9092`, `depends_on: kafka`, `CARD_DATA_SERVICE_URL=http://card-data-service:8081` y `CARD_LIMITS_SERVICE_URL=http://card-limits-service:8082`. Las URLs de antifraude y autorizador quedan en sus defaults de `localhost`.
+`services/payment-processing/Dockerfile` (multi-stage) y servicio `payment-processing-service` en compose (sin perfil: toda la configuración está en `application.yml`; los perfiles opcionales son `dev` y `prod`): puerto `8085`, `KAFKA_BOOTSTRAP_SERVERS=kafka:9092`, `depends_on: kafka`, `CARD_DATA_SERVICE_URL=http://card-data-service:8081` y `CARD_LIMITS_SERVICE_URL=http://card-limits-service:8082` y `CARD_CURRENCY_SERVICE_URL=http://card-currency-service:8086`. Las URLs de antifraude y autorizador quedan en sus defaults de `localhost`.
 
 
 ### 9.4 Observabilidad de la consistencia
@@ -626,10 +637,11 @@ Además:
 
 1. **Sin saldo a favor:** si la tarjeta ya pagó el consumo, `restore-credit` baja lo consumido hasta cero y el excedente de la devolución no se acredita en ningún lado. card-limits solo lo loguea.
 2. **Sin captura parcial:** la captura de una preautorización es siempre por el monto total. Para cobrar menos hay que reversarla y hacer una compra nueva.
-3. **El CVV no cuenta intentos:** a diferencia del PIN, un CVV incorrecto no suma intentos fallidos en card-data ni bloquea la tarjeta.
+3. **Tope por transacción en la moneda del límite:** `TransactionValidationService` controla el máximo de 50.000 sobre el monto convertido, y el request también limita `amount` a 50.000 en su propia moneda. Con ARS como moneda del límite, una compra de más de unos USD 43 (a 1150) supera el tope.
+4. **El CVV no cuenta intentos:** a diferencia del PIN, un CVV incorrecto no suma intentos fallidos en card-data ni bloquea la tarjeta.
 
 ### 10.2 Técnicas
 
-4. **Exceso de límite por compensación:** deshacer una restauración puede dejar la tarjeta por encima de su límite (§4.7). Es el resultado correcto y se alerta, pero no hay un flujo de negocio para resolverlo: no se avisa al cliente ni se bloquea la tarjeta; solo se rechazan las compras siguientes.
-5. **Seguridad:** el token del PAN lo provee el cliente (no hay servicio de tokenización). El PIN de los adelantos ya viaja cifrado (PIN block), pero la clave de cifrado de PIN es una sola por configuración, sin HSM ni DUKPT (una clave por transacción). Entre servicios no hay TLS ni autenticación.
-6. **Sin tests de punta a punta:** hay tests unitarios de dominio, servicios de aplicación (incluido `RefundApplicationService`), adapters, saga, outbox y los cinco controllers (MockMvc con los mappers y el `GlobalExceptionHandler` reales). La persistencia se prueba contra PostgreSQL con Testcontainers (`TransactionPersistenceTest`, `OutboxAndCreditOperationQueriesTest`): mapeo, `@Version`, consultas, el lock de `findByIdForUpdate` y los `FOR UPDATE SKIP LOCKED` del relay y del reconciliador. Ese esquema lo genera Hibernate, no las migraciones de `card-management-database`. Falta un test con el contexto completo de Spring, Kafka, card-data y card-limits.
+5. **Exceso de límite por compensación:** deshacer una restauración puede dejar la tarjeta por encima de su límite (§4.7). Es el resultado correcto y se alerta, pero no hay un flujo de negocio para resolverlo: no se avisa al cliente ni se bloquea la tarjeta; solo se rechazan las compras siguientes.
+6. **Seguridad:** el token del PAN lo provee el cliente (no hay servicio de tokenización). El PIN de los adelantos ya viaja cifrado (PIN block), pero la clave de cifrado de PIN es una sola por configuración, sin HSM ni DUKPT (una clave por transacción). Entre servicios no hay TLS ni autenticación.
+7. **Sin tests de punta a punta:** hay tests unitarios de dominio, servicios de aplicación (incluido `RefundApplicationService`), adapters, saga, outbox y los cinco controllers (MockMvc con los mappers y el `GlobalExceptionHandler` reales). La persistencia se prueba contra PostgreSQL con Testcontainers (`TransactionPersistenceTest`, `OutboxAndCreditOperationQueriesTest`): mapeo, `@Version`, consultas, el lock de `findByIdForUpdate` y los `FOR UPDATE SKIP LOCKED` del relay y del reconciliador. Ese esquema lo genera Hibernate, no las migraciones de `card-management-database`. Falta un test con el contexto completo de Spring, Kafka, card-data y card-limits.

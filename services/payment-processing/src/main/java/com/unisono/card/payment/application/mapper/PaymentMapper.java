@@ -87,17 +87,12 @@ public interface PaymentMapper {
         );
     }
 
+    /**
+     * Amount in the currency of the request. The conversion to the credit limit currency is done afterwards by
+     * {@link com.unisono.card.payment.domain.service.BillingAmountService}.
+     */
     default TransactionAmount mapToTransactionAmount(ProcessPaymentCommand command) {
-        Money amount = Money.of(command.getAmount(), command.getCurrency());
-
-        // Check if there's currency conversion
-        if (command.getLocalAmount() != null && command.getLocalCurrency() != null
-                && command.getExchangeRate() != null) {
-            Money localAmount = Money.of(command.getLocalAmount(), command.getLocalCurrency());
-            return TransactionAmount.withConversion(amount, localAmount, command.getExchangeRate());
-        }
-
-        return TransactionAmount.of(amount);
+        return TransactionAmount.of(Money.of(command.getAmount(), command.getCurrency()));
     }
 
     default String getAuthorizationCodeValue(Transaction transaction) {

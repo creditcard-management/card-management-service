@@ -38,6 +38,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.YearMonth;
+import java.math.BigDecimal;
+import java.util.stream.Stream;
 import java.util.List;
 import java.util.Optional;
 
@@ -470,6 +472,53 @@ class PaymentDomainServiceTest {
         }
 
         @Test
+        void shouldBillPartialRefundOfConvertedPurchaseAtTheOriginalRate() {
+            Transaction original = approvedUsdPurchase();
+
+            Transaction refund = service.processRefund(original, CARD_ID,
+                    TransactionAmount.of(Money.of(new BigDecimal("33.33"), "USD")), List.of(), false);
+
+            // 33.33 × 1150.50 = 38346.165 → 38346.17 ARS (HALF_UP), con la tasa de la compra y no la de hoy
+            assertThat(refund.getAmount().getAmount()).isEqualTo(Money.of(new BigDecimal("33.33"), "USD"));
+            assertThat(refund.getAmount().getEffectiveAmount()).isEqualTo(Money.ofARS(new BigDecimal("38346.17")));
+            assertThat(refund.getAmount().getExchangeRate()).isEqualByComparingTo("1150.50");
+            assertThat(refund.getAmount().getExchangeRateId()).isEqualTo("rate-1");
+            verify(creditLimitPort).restoreCredit(any(), eq(CARD_ID), eq(Money.ofARS(new BigDecimal("38346.17"))),
+                    any(), any(), eq(false));
+        }
+
+        @Test
+        void shouldRestoreExactlyTheConsumedCreditAfterSeveralRefundsOfConvertedPurchase() {
+            Transaction original = approvedUsdPurchase();
+            Transaction first = service.processRefund(original, CARD_ID,
+                    TransactionAmount.of(Money.of(new BigDecimal("33.33"), "USD")), List.of(), false);
+            Transaction second = service.processRefund(original, CARD_ID,
+                    TransactionAmount.of(Money.of(new BigDecimal("33.33"), "USD")), List.of(first), false);
+
+            Transaction rest = service.processRefund(original, CARD_ID,
+                    TransactionAmount.of(Money.of(new BigDecimal("33.34"), "USD")), List.of(first, second), true);
+
+            // 33.34 × 1150.50 = 38357.67, pero queda 38357.66 sin restaurar: el último cierra el redondeo
+            assertThat(rest.getAmount().getEffectiveAmount()).isEqualTo(Money.ofARS(new BigDecimal("38357.66")));
+            Money restored = Stream.of(first, second, rest).map(t -> t.getAmount().getEffectiveAmount())
+                    .reduce(Money.zero("ARS"), Money::add);
+            assertThat(restored).isEqualTo(original.getAmount().getEffectiveAmount());
+            assertThat(service.remainingToRefund(original, List.of(first, second, rest)).isZero()).isTrue();
+            assertThat(service.remainingBilledToRefund(original, List.of(first, second, rest)).isZero()).isTrue();
+        }
+
+        @Test
+        void shouldRejectRefundInAnotherCurrencyThanTheOriginal() {
+            Transaction original = approvedUsdPurchase();
+
+            assertThatThrownBy(() -> service.processRefund(original, CARD_ID,
+                    TransactionAmount.of(Money.ofARS(1000)), List.of(), false))
+                    .isInstanceOf(InvalidTransactionException.class)
+                    .hasMessageContaining("must match the original transaction currency USD");
+            verifyNoInteractions(creditLimitPort);
+        }
+
+        @Test
         void shouldRejectRefundOfTransactionThatIsNotApproved() {
             Transaction preAuthorized = authorizedPurchase();
 
@@ -590,6 +639,17 @@ class PaymentDomainServiceTest {
 
     private static Transaction approvedPurchase() {
         Transaction transaction = authorizedPurchase();
+        transaction.approve();
+        return transaction;
+    }
+
+    /** Compra de USD 100.00 cobrada en ARS 115050.00 a 1150.50 (cotización rate-1 de card-currency). */
+    private static Transaction approvedUsdPurchase() {
+        Transaction transaction = Transaction.createPurchase(CARD_ID, cardData(), merchant(),
+                TransactionAmount.withConversion(Money.of(new BigDecimal("100.00"), "USD"),
+                        Money.ofARS(new BigDecimal("115050.00")), new BigDecimal("1150.50"), "rate-1"),
+                PaymentMethod.CHIP);
+        transaction.authorize(AuthorizationCode.approved("AUTH03"), 10);
         transaction.approve();
         return transaction;
     }

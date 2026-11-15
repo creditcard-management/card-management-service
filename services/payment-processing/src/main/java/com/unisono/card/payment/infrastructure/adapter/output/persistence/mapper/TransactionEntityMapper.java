@@ -53,6 +53,7 @@ public class TransactionEntityMapper {
                 .localAmount(getLocalAmount(transaction))
                 .localCurrency(getLocalCurrency(transaction))
                 .exchangeRate(transaction.getAmount().getExchangeRate())
+                .exchangeRateId(transaction.getAmount().getExchangeRateId())
                 // Card (tokenized)
                 .cardNumberToken(cardData.getCardNumberToken())
                 .cardLastFour(cardData.getLastFourDigits())
@@ -166,7 +167,8 @@ public class TransactionEntityMapper {
         if (entity.getLocalAmount() != null && entity.getLocalCurrency() != null
                 && entity.getExchangeRate() != null) {
             Money localAmount = Money.of(entity.getLocalAmount(), entity.getLocalCurrency());
-            return TransactionAmount.withConversion(amount, localAmount, entity.getExchangeRate());
+            return TransactionAmount.withConversion(amount, localAmount, entity.getExchangeRate(),
+                    entity.getExchangeRateId());
         }
 
         return TransactionAmount.of(amount);

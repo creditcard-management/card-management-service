@@ -34,6 +34,7 @@ flowchart LR
     CL[card-lifecycle] -->|REST: estados, emisión, activación| CD[card-data]
     PP[payment-processing] -->|REST: tarjeta, PIN, CVV| CD
     PP -->|REST: validar y consumir crédito| LIM[card-limits]
+    PP -->|REST: convertir a la moneda del límite| CUR[card-currency]
     LIM -.->|lee la tabla cards| DB[(PostgreSQL)]
     CD -->|card.*| K[(Kafka)]
     K -->|card.* → historial| CL
@@ -44,7 +45,7 @@ flowchart LR
 - **card-data** es dueño de la tarjeta. card-lifecycle valida cada transición y después llama a card-data, que publica el evento `card.*` por un outbox transaccional.
 - **card-lifecycle** arma el historial consumiendo esos eventos, así que depende de Kafka para mostrarlo.
 - **payment-processing** valida la tarjeta en card-data y el crédito en card-limits antes de autorizar. Un rechazo por fraude publica `payment.processing.declined` y card-data bloquea la tarjeta.
-- **card-currency** todavía no está integrado: payment-processing sigue recibiendo la tasa de cambio en el request.
+- **card-currency** convierte los pagos a la moneda del límite de la tarjeta: payment-processing le pide la conversión cuando el pago viene en otra moneda.
 - Todos los servicios comparten la base `card_management_db`. El esquema se administra en otro repo: [card-management-database](https://github.com/creditcard-managment/card-management-database).
 
 ## Levantar el stack

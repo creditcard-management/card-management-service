@@ -40,6 +40,7 @@ public interface TransactionMapper {
     @Mapping(target = "localAmount", expression = "java(getLocalAmount(transaction))")
     @Mapping(target = "localCurrency", expression = "java(getLocalCurrency(transaction))")
     @Mapping(target = "exchangeRate", expression = "java(getExchangeRate(transaction))")
+    @Mapping(target = "exchangeRateId", expression = "java(transaction.getAmount().getExchangeRateId())")
 
     // Card info (masked)
     @Mapping(target = "cardLastFour", expression = "java(transaction.getCardData().getLastFourDigits())")

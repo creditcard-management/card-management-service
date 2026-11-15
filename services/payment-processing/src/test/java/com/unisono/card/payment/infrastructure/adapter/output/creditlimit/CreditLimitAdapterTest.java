@@ -206,4 +206,32 @@ class CreditLimitAdapterTest {
                         {"id":"%s","cardId":"%s","availableCredit":100000.00,"currency":"ARS"}
                         """.formatted(LIMIT_ID, CARD_ID.getValue()), MediaType.APPLICATION_JSON));
     }
+
+    @Test
+    void shouldResolveTheCurrencyOfTheCreditLimit() {
+        server.expect(requestTo(BASE + "/api/v1/credit-limits/card/" + CARD_ID.getValue()))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":\"" + LIMIT_ID + "\",\"currency\":\"ARS\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(adapter.findLimitCurrency(CARD_ID)).contains("ARS");
+        server.verify();
+    }
+
+    @Test
+    void shouldReturnNoCurrencyWhenTheCardHasNoCreditLimit() {
+        server.expect(requestTo(BASE + "/api/v1/credit-limits/card/" + CARD_ID.getValue()))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThat(adapter.findLimitCurrency(CARD_ID)).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    void shouldFailWhenCardLimitsIsDownResolvingTheCurrency() {
+        server.expect(requestTo(BASE + "/api/v1/credit-limits/card/" + CARD_ID.getValue()))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> adapter.findLimitCurrency(CARD_ID)).isInstanceOf(ExternalServiceException.class);
+    }
 }

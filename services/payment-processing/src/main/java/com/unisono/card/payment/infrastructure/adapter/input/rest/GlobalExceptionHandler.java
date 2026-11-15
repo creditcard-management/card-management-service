@@ -183,6 +183,25 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handle amounts that cannot be converted to the credit limit currency (card-currency: currency not
+     * supported or no exchange rate)
+     */
+    @ExceptionHandler(CurrencyConversionException.class)
+    public ResponseEntity<ErrorResponse> handleCurrencyConversion(
+            CurrencyConversionException ex, WebRequest request) {
+
+        log.warn("Currency conversion failed: {}", ex.getMessage());
+
+        ErrorResponse error = errorMapper.toErrorResponse(
+                "CURRENCY_NOT_SUPPORTED",
+                ex.getMessage(),
+                "The transaction currency cannot be converted to the card's currency",
+                request.getDescription(false)
+        );
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(error);
+    }
+
+    /**
      * Handle unavailable dependencies (card-data, card-limits)
      */
     @ExceptionHandler(ExternalServiceException.class)

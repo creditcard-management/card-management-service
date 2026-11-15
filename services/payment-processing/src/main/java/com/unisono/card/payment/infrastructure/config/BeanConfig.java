@@ -1,5 +1,6 @@
 package com.unisono.card.payment.infrastructure.config;
 
+import com.unisono.card.payment.domain.service.BillingAmountService;
 import com.unisono.card.payment.domain.service.PaymentDomainService;
 import com.unisono.card.payment.domain.service.TransactionValidationService;
 import com.unisono.card.payment.domain.port.output.*;
@@ -30,6 +31,15 @@ public class BeanConfig {
                 fraudCheckPort,
                 authorizationPort
         );
+    }
+
+    /**
+     * Billing amount (conversion to the credit limit currency) bean
+     */
+    @Bean
+    public BillingAmountService billingAmountService(CreditLimitPort creditLimitPort,
+                                                     CurrencyConversionPort currencyConversionPort) {
+        return new BillingAmountService(creditLimitPort, currencyConversionPort);
     }
 
     /**

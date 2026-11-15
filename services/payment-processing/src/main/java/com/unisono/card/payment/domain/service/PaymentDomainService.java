@@ -166,9 +166,15 @@ public class PaymentDomainService {
         // 1. Original transaction must be refundable and belong to the card
         validateCanRefund(original, cardId);
 
-        // 2. Amount against what is left to refund
+        // 2. Amount, in the currency of the original transaction, against what is left to refund
+        Money requested = amount.getAmount();
+        String originalCurrency = original.getAmount().getAmount().getCurrencyCode();
+        if (!requested.getCurrencyCode().equals(originalCurrency)) {
+            throw new InvalidTransactionException(originalTransactionId, String.format(
+                    "Refund currency %s must match the original transaction currency %s",
+                    requested.getCurrencyCode(), originalCurrency));
+        }
         Money remaining = remainingToRefund(original, previousRefunds);
-        Money requested = amount.getEffectiveAmount();
 
         if (!remaining.isPositive()) {
             throw new InvalidTransactionException(originalTransactionId, "Transaction is already fully refunded");
@@ -185,16 +191,17 @@ public class PaymentDomainService {
         // 3. Validate card
         validateCard(cardId, original.getCardData());
 
-        // 4. Create refund transaction linked to the original
+        // 4. Create refund transaction linked to the original, billed at the original's rate
+        TransactionAmount refundAmount = toRefundAmount(original, previousRefunds, requested, remaining);
         Transaction refundTransaction = Transaction.createRefund(
-                cardId, original.getCardData(), original.getMerchantInfo(), amount, originalTransactionId
+                cardId, original.getCardData(), original.getMerchantInfo(), refundAmount, originalTransactionId
         );
 
         // 5. Auto-approve refunds (no authorization needed)
         refundTransaction.approveRefund(originalTransactionId);
 
         // 6. Undo the consumption of the original (available credit, daily and monthly quota)
-        creditLimitPort.restoreCredit(refundTransaction.getTransactionId(), cardId, requested,
+        creditLimitPort.restoreCredit(refundTransaction.getTransactionId(), cardId, refundAmount.getEffectiveAmount(),
                 original.getTransactionDate().toLocalDate(),
                 "Refund " + refundTransaction.getTransactionId() + " of " + originalTransactionId,
                 original.getType() == TransactionType.CASH_ADVANCE);
@@ -204,15 +211,57 @@ public class PaymentDomainService {
     }
 
     /**
-     * Amount of the original transaction that has not been refunded yet
+     * Amount of the original transaction that has not been refunded yet, in the original currency
      */
     public Money remainingToRefund(Transaction original, List<Transaction> previousRefunds) {
-        Money originalAmount = original.getAmount().getEffectiveAmount();
+        Money originalAmount = original.getAmount().getAmount();
         Money refunded = previousRefunds.stream()
                 .filter(Transaction::isSuccessful)
-                .map(refund -> refund.getAmount().getEffectiveAmount())
+                .map(refund -> refund.getAmount().getAmount())
                 .reduce(Money.zero(originalAmount.getCurrencyCode()), Money::add);
         return originalAmount.subtract(refunded);
+    }
+
+    /**
+     * Credit consumed by the original transaction that has not been restored by refunds yet (effective amount,
+     * in the credit limit currency)
+     */
+    public Money remainingBilledToRefund(Transaction original, List<Transaction> previousRefunds) {
+        Money billed = original.getAmount().getEffectiveAmount();
+        Money restored = previousRefunds.stream()
+                .filter(Transaction::isSuccessful)
+                .map(refund -> refund.getAmount().getEffectiveAmount())
+                .reduce(Money.zero(billed.getCurrencyCode()), Money::add);
+        return billed.subtract(restored);
+    }
+
+    /**
+     * Refund amount in the original currency and, if the original was converted, in the credit limit currency
+     * at the original's rate (not today's): refunds give back exactly the credit the purchase consumed.
+     * Refunding what is left gives back all the credit still consumed, so rounding never leaves cents behind;
+     * a partial refund never gives back more than that.
+     */
+    private TransactionAmount toRefundAmount(Transaction original, List<Transaction> previousRefunds,
+                                             Money requested, Money remaining) {
+        TransactionAmount originalAmount = original.getAmount();
+        if (!originalAmount.hasCurrencyConversion()) {
+            return TransactionAmount.of(requested);
+        }
+
+        Money remainingBilled = remainingBilledToRefund(original, previousRefunds);
+        Money billed = requested.equals(remaining)
+                ? remainingBilled
+                : Money.of(requested.getAmount().multiply(originalAmount.getExchangeRate()),
+                        remainingBilled.getCurrency());
+        if (billed.isGreaterThan(remainingBilled)) {
+            billed = remainingBilled;
+        }
+        if (!billed.isPositive()) {
+            throw new InvalidTransactionException(original.getTransactionId(), String.format(
+                    "Refund amount %s is too small to convert to %s", requested, remainingBilled.getCurrencyCode()));
+        }
+        return TransactionAmount.withConversion(requested, billed, originalAmount.getExchangeRate(),
+                originalAmount.getExchangeRateId());
     }
 
     /**

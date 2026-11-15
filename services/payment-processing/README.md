@@ -11,7 +11,7 @@ Microservicio dueño del aggregate `Transaction`. Procesa compras, adelantos y p
 | Swagger UI | `http://localhost:8085/swagger-ui.html` |
 | Tablas | `transactions`, `payment_outbox_events`, `payment_credit_operations`; lee `merchants` y `payment_terminals` |
 | Kafka | Publica `payment.*`. card-data consume `payment.processing.declined` |
-| REST | card-data (`CARD_DATA_SERVICE_URL`), card-limits (`CARD_LIMITS_SERVICE_URL`), antifraude y autorizador |
+| REST | card-data (`CARD_DATA_SERVICE_URL`), card-limits (`CARD_LIMITS_SERVICE_URL`), card-currency (`CARD_CURRENCY_SERVICE_URL`), antifraude y autorizador |
 | Depende de | `card-shared`, `card-events` |
 
 ## API
@@ -24,11 +24,13 @@ Microservicio dueño del aggregate `Transaction`. Procesa compras, adelantos y p
 | Liquidación | `POST /settlements/transaction/{transactionId}`, `/settlements/batch`, `/settlements/all-pending` |
 | Consultas | `GET /transactions/{transactionId}`, `/transactions/card/{cardId}` (y `/status/{status}`, `/range`, `/summary`), `/transactions/pending-settlement` |
 
-Un pago aprobado responde 201 y uno rechazado, 402 (queda guardado como `DECLINED`). El crédito se consume en card-limits al aprobar y se restaura con un reverso o una devolución. Los bodies, las reglas y los códigos de error están en `PAYMENT.md` §4 y §5.
+Un pago aprobado responde 201 y uno rechazado, 402 (queda guardado como `DECLINED`). El crédito se consume en card-limits al aprobar y se restaura con un reverso o una devolución.
+
+El pago se cobra en la moneda del límite de la tarjeta: si viene en otra, card-currency lo convierte con la cotización vigente (422 `CURRENCY_NOT_SUPPORTED` si no hay). Las devoluciones van en la moneda del pago original y usan su tasa. Los bodies, las reglas y los códigos de error están en `PAYMENT.md` §4 y §5.
 
 ## Ejecución local
 
-Desde la raíz del repo. Necesita PostgreSQL (migraciones de `card-management-database`), Kafka, card-data y card-limits levantados, y un comercio y una terminal activos en la base:
+Desde la raíz del repo. Necesita PostgreSQL (migraciones de `card-management-database`, hasta V20), Kafka, card-data, card-limits y card-currency levantados, y un comercio y una terminal activos en la base:
 
 ```bash
 docker exec -i card-db-postgres psql -U postgres -d card_management_db < docs/postman/dev-seed-merchants.sql
@@ -49,7 +51,8 @@ mvn -pl services/payment-processing -am test
 | `PaymentDomainServiceTest`, `TransactionRefundTest`, `TransactionReversalServiceTest`, `RefundApplicationServiceTest`, `SettlementServiceTest`, `PreAuthorizationExpiryServiceTest` | Flujos de pago, devolución, reverso, liquidación y vencimiento de preautorizaciones |
 | `SagaCreditLimitPortTest`, `CreditOperationCompensatorTest`, `CreditOperationReconcilerTest`, `ConsistencyMonitorTest` | Consistencia del crédito con card-limits (compensación y reconciliación) |
 | `PaymentControllerTest`, `RefundControllerTest`, `ReversalControllerTest`, `SettlementControllerTest`, `TransactionControllerTest`, `GlobalExceptionHandlerTest` | Endpoints y mapeo de errores (MockMvc) |
-| `CardValidationAdapterTest`, `CreditLimitAdapterTest`, `AuthorizationAdapterTest`, `MerchantValidationAdapterTest` | Adapters de card-data, card-limits, autorizador y comercios |
+| `BillingAmountServiceTest` | Conversión a la moneda del límite |
+| `CardValidationAdapterTest`, `CreditLimitAdapterTest`, `CurrencyConversionAdapterTest`, `AuthorizationAdapterTest`, `MerchantValidationAdapterTest` | Adapters de card-data, card-limits, card-currency, autorizador y comercios |
 | `PaymentOutboxRelayTest`, `PaymentOutboxCleanerTest`, `OutboxPaymentEventPublisherTest`, `PaymentEventTopicResolverTest`, `PaymentIntegrationEventMapperTest` | Outbox y eventos |
 | `TransactionEntityMapperTest`, `DefaultCurrencyTest` | Mapeos y moneda por defecto |
 | `TransactionPersistenceTest`, `OutboxAndCreditOperationQueriesTest` (base `PostgresPersistenceTest`) | Persistencia contra PostgreSQL (Testcontainers, requieren Docker) |

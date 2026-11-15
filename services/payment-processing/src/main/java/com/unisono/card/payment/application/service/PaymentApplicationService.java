@@ -12,6 +12,7 @@ import com.unisono.card.payment.domain.model.TransactionType;
 import com.unisono.card.payment.domain.port.input.ProcessPaymentUseCase;
 import com.unisono.card.payment.domain.port.output.PaymentEventPublisher;
 import com.unisono.card.payment.domain.port.output.TransactionRepository;
+import com.unisono.card.payment.domain.service.BillingAmountService;
 import com.unisono.card.payment.domain.service.PaymentDomainService;
 import com.unisono.card.payment.domain.service.TransactionValidationService;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentApplicationService implements ProcessPaymentUseCase {
 
     private final PaymentDomainService paymentDomainService;
+    private final BillingAmountService billingAmountService;
     private final TransactionValidationService validationService;
     private final TransactionRepository transactionRepository;
     private final PaymentEventPublisher eventPublisher;
@@ -51,6 +53,10 @@ public class PaymentApplicationService implements ProcessPaymentUseCase {
         try {
             // 1. Map command to domain objects
             PaymentMapper.TransactionComponents components = paymentMapper.toTransactionComponents(command);
+
+            // 1b. Bill in the currency of the card's credit limit (card-currency converts if it differs)
+            components.setAmount(billingAmountService.toBillingAmount(
+                    components.getCardId(), components.getAmount().getAmount()));
 
             // 2. Validate amount and payment method
             validationService.validateAmount(components.getAmount());
