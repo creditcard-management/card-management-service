@@ -69,6 +69,26 @@ final class InMemoryRepositories {
         }
 
         @Override
+        public Optional<ExchangeRate> findByIdForUpdate(String rateId) {
+            return rates.stream().filter(r -> r.getRateId().equals(rateId)).findFirst();
+        }
+
+        @Override
+        public Optional<ExchangeRate> findEndingAt(CurrencyPair pair, Instant validTo) {
+            return rates.stream().filter(r -> r.getPair().equals(pair) && validTo.equals(r.getValidTo())).findFirst();
+        }
+
+        @Override
+        public boolean existsForPair(CurrencyPair pair) {
+            return rates.stream().anyMatch(r -> r.getPair().equals(pair));
+        }
+
+        @Override
+        public void delete(ExchangeRate rate) {
+            rates.removeIf(r -> r.getRateId().equals(rate.getRateId()));
+        }
+
+        @Override
         public Optional<ExchangeRate> findValidAt(CurrencyPair pair, Instant at) {
             return rates.stream().filter(r -> r.getPair().equals(pair) && r.isValidAt(at)).findFirst();
         }

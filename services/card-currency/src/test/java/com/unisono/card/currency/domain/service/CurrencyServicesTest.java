@@ -142,6 +142,28 @@ class CurrencyServicesTest {
         }
 
         @Test
+        void eachPairIsQuotedInASingleDirection() {
+            publish("1000");
+
+            assertThatThrownBy(() -> exchangeRates.publish(
+                    new PublishRateCommand(USD_ARS.inverse(), new BigDecimal("0.001"), null)))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasMessageContaining("already quoted as USD/ARS");
+            clock.advance(Duration.ofMinutes(1));
+            assertThat(publish("1100").getRate()).isEqualByComparingTo("1100");
+        }
+
+        @Test
+        void getRateRequiresActiveCurrencies() {
+            publish("1000");
+            catalog.deactivate("USD");
+
+            assertThatThrownBy(() -> exchangeRates.getRate(USD_ARS, null))
+                    .isInstanceOf(CurrencyNotSupportedException.class);
+            assertThat(exchangeRates.getHistory(USD_ARS, 10)).hasSize(1);
+        }
+
+        @Test
         void missingRateIsNotFound() {
             assertThatThrownBy(() -> exchangeRates.getRate(USD_ARS, null))
                     .isInstanceOf(ExchangeRateNotFoundException.class);
@@ -157,6 +179,74 @@ class CurrencyServicesTest {
             List<ExchangeRate> history = exchangeRates.getHistory(USD_ARS, 50);
             assertThat(history).hasSize(3);
             assertThat(history.get(0).getRate()).isEqualByComparingTo("1005");
+        }
+    }
+
+    @Nested
+    @DisplayName("Cancelación de cotizaciones programadas")
+    class Cancellation {
+
+        private ExchangeRate schedule(String value, long secondsFromNow) {
+            return exchangeRates.publish(new PublishRateCommand(USD_ARS, new BigDecimal(value),
+                    clock.instant().plusSeconds(secondsFromNow)));
+        }
+
+        private ExchangeRate stored(ExchangeRate rate) {
+            return rates.findByIdForUpdate(rate.getRateId()).orElseThrow();
+        }
+
+        @Test
+        void cancellingTheOpenScheduledRateReopensThePreviousOne() {
+            ExchangeRate current = publish("1000");
+            ExchangeRate scheduled = schedule("1200", 600);
+
+            exchangeRates.cancelScheduled(scheduled.getRateId());
+
+            assertThat(rates.findByIdForUpdate(scheduled.getRateId())).isEmpty();
+            assertThat(stored(current).isOpen()).isTrue();
+            clock.advance(Duration.ofSeconds(600));
+            assertThat(exchangeRates.getRate(USD_ARS, null).getRateId()).isEqualTo(current.getRateId());
+            // Se puede volver a programar otra en cualquier momento posterior a la vigente
+            assertThat(schedule("1150", 60).getRate()).isEqualByComparingTo("1150");
+        }
+
+        @Test
+        void cancellingAScheduledRateInTheMiddleExtendsThePreviousOne() {
+            ExchangeRate current = publish("1000");
+            ExchangeRate first = schedule("1100", 600);
+            ExchangeRate second = schedule("1200", 1200);
+
+            exchangeRates.cancelScheduled(first.getRateId());
+
+            assertThat(stored(current).getValidTo()).isEqualTo(second.getValidFrom());
+            assertThat(exchangeRates.getRate(USD_ARS, T0.plusSeconds(900)).getRateId())
+                    .isEqualTo(current.getRateId());
+            assertThat(stored(second).isOpen()).isTrue();
+        }
+
+        @Test
+        void cancellingTheOnlyRateOfThePairLeavesItWithoutRates() {
+            ExchangeRate scheduled = schedule("1000", 60);
+
+            exchangeRates.cancelScheduled(scheduled.getRateId());
+
+            assertThat(exchangeRates.getHistory(USD_ARS, 10)).isEmpty();
+        }
+
+        @Test
+        void rejectsRatesThatAlreadyStartedAndUnknownIds() {
+            ExchangeRate current = publish("1000");
+
+            assertThatThrownBy(() -> exchangeRates.cancelScheduled(current.getRateId()))
+                    .isInstanceOf(BusinessRuleException.class);
+            assertThatThrownBy(() -> exchangeRates.cancelScheduled("missing"))
+                    .isInstanceOf(NotFoundException.class);
+
+            ExchangeRate scheduled = schedule("1100", 60);
+            clock.advance(Duration.ofSeconds(60));
+            assertThatThrownBy(() -> exchangeRates.cancelScheduled(scheduled.getRateId()))
+                    .isInstanceOf(BusinessRuleException.class);
+            assertThat(stored(scheduled)).isNotNull();
         }
     }
 

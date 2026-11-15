@@ -7,6 +7,7 @@ import com.unisono.card.currency.domain.model.RateSource;
 import com.unisono.card.currency.domain.port.input.ExchangeRateUseCase;
 import com.unisono.card.currency.domain.port.output.ExchangeRateRepository;
 import com.unisono.card.shared.domain.exception.BusinessRuleException;
+import com.unisono.card.shared.domain.exception.NotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,13 @@ public class ExchangeRateService implements ExchangeRateUseCase {
         // Primero el lock del par y después la hora: si otra publicación del par estaba en curso, la nueva
         // arranca después de la que acaba de entrar.
         Optional<ExchangeRate> current = exchangeRateRepository.findOpenForUpdate(pair);
+        if (current.isEmpty() && exchangeRateRepository.existsForPair(pair.inverse())) {
+            // Cada par se cotiza en un solo sentido: dos tasas independientes (USD/ARS y ARS/USD) podrían
+            // contradecirse. La conversión usa la inversa sola.
+            throw new BusinessRuleException(String.format(
+                    "%s is already quoted as %s: publish %s instead (conversions use the inverse rate)",
+                    pair, pair.inverse(), pair.inverse()));
+        }
         Instant now = clock.instant();
         Instant effectiveFrom = command.effectiveFrom() != null ? command.effectiveFrom() : now;
         if (effectiveFrom.isBefore(now)) {
@@ -68,7 +76,30 @@ public class ExchangeRateService implements ExchangeRateUseCase {
     }
 
     @Override
+    @Transactional
+    public ExchangeRate cancelScheduled(String rateId) {
+        ExchangeRate scheduled = exchangeRateRepository.findByIdForUpdate(rateId)
+                .orElseThrow(() -> new NotFoundException("Exchange rate", rateId));
+        scheduled.ensureCancellable(clock.instant());
+
+        Optional<ExchangeRate> previous = exchangeRateRepository.findEndingAt(scheduled.getPair(),
+                scheduled.getValidFrom());
+        // Primero el DELETE: si la cancelada es la abierta, la anterior no puede reabrirse antes (índice único)
+        exchangeRateRepository.delete(scheduled);
+        previous.ifPresent(rate -> {
+            rate.resumeAfter(scheduled);
+            exchangeRateRepository.save(rate);
+        });
+
+        log.info("Cancelled scheduled {} rate {} from {} ({} extended)", scheduled.getPair(), rateId,
+                scheduled.getValidFrom(), previous.map(ExchangeRate::getRateId).orElse("none"));
+        return scheduled;
+    }
+
+    @Override
     public ExchangeRate getRate(CurrencyPair pair, Instant at) {
+        currencyCatalog.requireActive(pair.base());
+        currencyCatalog.requireActive(pair.quote());
         Instant instant = at != null ? at : clock.instant();
         return exchangeRateRepository.findValidAt(pair, instant)
                 .orElseThrow(() -> new ExchangeRateNotFoundException(pair, instant));

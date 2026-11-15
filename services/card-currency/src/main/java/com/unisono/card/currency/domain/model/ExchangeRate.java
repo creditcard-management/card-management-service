@@ -85,6 +85,32 @@ public class ExchangeRate {
         this.validTo = next.validFrom;
     }
 
+    /**
+     * Solo se puede cancelar una cotización programada: si ya empezó, alguna conversión pudo haberla usado.
+     */
+    public void ensureCancellable(Instant now) {
+        if (!validFrom.isAfter(now)) {
+            throw new BusinessRuleException(String.format(
+                    "Exchange rate %s already started at %s: it can only be superseded by a new one",
+                    rateId, validFrom));
+        }
+    }
+
+    /**
+     * Extiende la vigencia de esta cotización (la anterior de {@code cancelled}) hasta donde llegaba la cancelada:
+     * si la cancelada era la abierta, esta vuelve a quedar abierta.
+     */
+    public void resumeAfter(ExchangeRate cancelled) {
+        if (!pair.equals(cancelled.pair)) {
+            throw new BusinessRuleException("Cannot resume " + pair + " after a rate for " + cancelled.pair);
+        }
+        if (validTo == null || !validTo.equals(cancelled.validFrom)) {
+            throw new BusinessRuleException(
+                    "Exchange rate " + rateId + " does not end where " + cancelled.rateId + " starts");
+        }
+        this.validTo = cancelled.validTo;
+    }
+
     public boolean isOpen() {
         return validTo == null;
     }

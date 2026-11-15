@@ -37,10 +37,22 @@ public class SupportedCurrency {
     }
 
     /**
-     * Alta de una moneda nueva: queda activa.
+     * Decimales que soporta el sistema: {@code Money} (card-shared) trabaja siempre con escala 2.
+     */
+    public static final int SUPPORTED_FRACTION_DIGITS = 2;
+
+    /**
+     * Alta de una moneda nueva: queda activa. Solo se aceptan monedas de 2 decimales (ISO 4217), porque
+     * {@code Money} redondea todo a 2: una moneda sin decimales (JPY) o con 3 (BHD) quedaría mal representada.
      */
     public static SupportedCurrency register(String code, String name, Instant now) {
-        return new SupportedCurrency(CurrencyPair.currency(code), name, true, now, now);
+        Currency currency = CurrencyPair.currency(code);
+        if (currency.getDefaultFractionDigits() != SUPPORTED_FRACTION_DIGITS) {
+            throw new BusinessRuleException(String.format(
+                    "Currency %s uses %d decimals; only currencies with %d decimals are supported",
+                    currency.getCurrencyCode(), currency.getDefaultFractionDigits(), SUPPORTED_FRACTION_DIGITS));
+        }
+        return new SupportedCurrency(currency, name, true, now, now);
     }
 
     /**
