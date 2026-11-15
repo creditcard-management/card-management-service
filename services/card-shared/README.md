@@ -10,7 +10,7 @@ Librería base (*shared kernel*) del sistema de tarjetas: Value Objects, excepci
 |---|---|
 | `domain.valueobject` | `CardId`, `ClientId`, `CardNumber`, `CVV`, `PIN`, `ExpirationDate`, `Money`, `Percentage`, `CardStatus` |
 | `domain.exception` | `DomainException`, `ValidationException`, `InvalidValueObjectException`, `BusinessRuleException`, `NotFoundException` |
-| `infrastructure.security` | `EncryptionService` / `AesEncryptionService` (AES-256-GCM, claves versionadas), `HashingService` / `BCryptHashingService`, `EncryptionProperties` |
+| `infrastructure.security` | `EncryptionService` / `AesEncryptionService` (AES-256-GCM, claves versionadas), `HashingService` / `BCryptHashingService`, `EncryptionProperties`, `Iso9564Format4PinBlock` (PIN blocks ISO 9564 formato 4; card-data los descifra para validar el PIN de los adelantos), `EncryptionException`, `HashingException`, `InvalidPinBlockException` |
 
 Los Value Objects son inmutables, se crean por factory (`CardNumber.of(...)`, `CardId.generate()`, `Money.ofARS(...)`) y lanzan `InvalidValueObjectException` si el dato es inválido.
 
@@ -57,3 +57,4 @@ mvn -pl services/card-shared test
 | `CardIdTest`, `CardNumberTest`, `ExpirationDateTest`, `MoneyTest`, `PercentageTest` | Reglas de cada Value Object |
 | `ValueObjectValidationTest` | Excepción común de los Value Objects |
 | `AesEncryptionServiceTest` | Cifrado, rotación, datos legacy y validación de configuración |
+| `Iso9564Format4PinBlockTest` | Formato 4, ida y vuelta, y rechazo de bloques de otra tarjeta, de otra clave o mal formados |
