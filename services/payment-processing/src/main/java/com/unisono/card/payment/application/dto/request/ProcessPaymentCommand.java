@@ -43,10 +43,7 @@ public class ProcessPaymentCommand {
     @Size(min = 3, max = 3, message = "Currency must be 3 characters (ISO 4217)")
     private String currency;
 
-    // Optional: for currency conversion
-    private BigDecimal localAmount;
-    private String localCurrency;
-    private BigDecimal exchangeRate;
+    // La conversión a la moneda del límite la hace card-currency: el cliente no manda tasa ni monto local
 
     @NotBlank(message = "Merchant ID is required")
     private String merchantId;

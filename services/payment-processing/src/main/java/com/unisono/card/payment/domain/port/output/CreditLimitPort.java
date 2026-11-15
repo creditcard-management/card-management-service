@@ -14,6 +14,12 @@ import com.unisono.card.shared.domain.valueobject.Money;
 public interface CreditLimitPort {
 
     /**
+     * Currency of the card's credit limit: the one credit is consumed and restored in. Empty if the card has
+     * no credit limit.
+     */
+    java.util.Optional<String> findLimitCurrency(CardId cardId);
+
+    /**
      * Check if the card can spend the amount (available credit, daily and monthly limits)
      */
     CreditCheck checkCredit(CardId cardId, Money amount, TransactionType type);

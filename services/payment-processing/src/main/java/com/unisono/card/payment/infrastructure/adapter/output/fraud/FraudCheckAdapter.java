@@ -23,7 +23,7 @@ public class FraudCheckAdapter implements FraudCheckPort {
 
     private final RestTemplate restTemplate;
 
-    @Value("${services.fraud-detection.url:http://localhost:8086}")
+    @Value("${services.fraud-detection.url:http://localhost:8088}")
     private String fraudDetectionServiceUrl;
 
     @Value("${fraud.risk-threshold.high:70}")

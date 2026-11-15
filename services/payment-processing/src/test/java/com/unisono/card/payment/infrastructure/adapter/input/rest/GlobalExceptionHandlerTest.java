@@ -41,8 +41,21 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.errorCode").value("BUSINESS_RULE_VIOLATION"));
     }
 
+    @Test
+    void shouldReturn422WhenTheCurrencyCannotBeConverted() throws Exception {
+        mockMvc.perform(get("/unconvertible-currency"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errorCode").value("CURRENCY_NOT_SUPPORTED"));
+    }
+
     @RestController
     static class ThrowingController {
+
+        @GetMapping("/unconvertible-currency")
+        void unconvertibleCurrency() {
+            throw new com.unisono.card.payment.domain.exception.CurrencyConversionException("BRL", "ARS",
+                    "no exchange rate");
+        }
 
         @GetMapping("/invalid-expiration")
         void invalidExpiration() {

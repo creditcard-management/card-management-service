@@ -32,7 +32,7 @@ import java.time.LocalDate;
  * exactly. {@link SagaCreditLimitPort} (the {@link CreditLimitPort} used by the domain) generates the ids and
  * cancels the operations whose payment transaction did not commit.
  *
- * The creditLimitId is resolved with GET /api/v1/credit-limits/card/{cardId}.
+ * The creditLimitId and the limit currency are resolved with GET /api/v1/credit-limits/card/{cardId}.
  */
 @Slf4j
 @Component
@@ -47,6 +47,27 @@ public class CreditLimitAdapter {
 
     @Value("${services.card-limits.url:http://localhost:8082}")
     private String cardLimitsServiceUrl;
+
+    /**
+     * Currency of the card's credit limit, empty if the card has none (404).
+     */
+    public java.util.Optional<String> findLimitCurrency(CardId cardId) {
+        String url = String.format("%s%s/card/%s", cardLimitsServiceUrl, BASE_PATH, cardId.getValue());
+        try {
+            CreditLimitResponse response = restTemplate.getForObject(url, CreditLimitResponse.class);
+            if (response == null || response.getCurrency() == null) {
+                throw new ExternalServiceException(SERVICE, "credit limit without currency for card " + cardId, null);
+            }
+            return java.util.Optional.of(response.getCurrency());
+
+        } catch (HttpClientErrorException.NotFound ex) {
+            log.warn("Card {} has no credit limit in card-limits", cardId);
+            return java.util.Optional.empty();
+        } catch (RestClientException ex) {
+            log.error("Error getting credit limit for {}: {}", cardId, ex.getMessage());
+            throw new ExternalServiceException(SERVICE, ex.getMessage(), ex);
+        }
+    }
 
     public CreditLimitPort.CreditCheck checkCredit(CardId cardId, Money amount, TransactionType type) {
         log.debug("Checking credit for card: {}, amount: {}, type: {}", cardId, amount, type);
@@ -194,6 +215,7 @@ public class CreditLimitAdapter {
     static class CreditLimitResponse {
         private String id;
         private String cardId;
+        private String currency;
     }
 
     @lombok.Data

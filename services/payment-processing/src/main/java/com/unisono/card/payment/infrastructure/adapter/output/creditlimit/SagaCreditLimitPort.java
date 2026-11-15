@@ -39,6 +39,11 @@ public class SagaCreditLimitPort implements CreditLimitPort {
     private final CreditOperationCompensator compensator;
 
     @Override
+    public java.util.Optional<String> findLimitCurrency(CardId cardId) {
+        return creditLimitAdapter.findLimitCurrency(cardId);
+    }
+
+    @Override
     public CreditCheck checkCredit(CardId cardId, Money amount, TransactionType type) {
         return creditLimitAdapter.checkCredit(cardId, amount, type);
     }

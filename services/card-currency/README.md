@@ -2,7 +2,7 @@
 
 Microservicio dueño de las monedas que acepta el sistema y de sus cotizaciones. Mantiene el catálogo de monedas (ISO 4217), guarda la cotización de cada par con su vigencia y convierte montos con la cotización vigente en un instante dado.
 
-> Todavía no está integrado: payment-processing sigue recibiendo `localAmount`, `localCurrency` y `exchangeRate` en el request y no consulta este servicio.
+> payment-processing lo usa para cobrar los pagos en la moneda del límite de la tarjeta (`POST /exchange-rates/convert`). Sin cotización para el par, el pago se rechaza con 422.
 
 | | |
 |---|---|

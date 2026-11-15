@@ -197,6 +197,7 @@ services:
       # Servicios internos por nombre de contenedor (localhost no sirve dentro de Docker)
       CARD_DATA_SERVICE_URL: http://card-data-service:8081
       CARD_LIMITS_SERVICE_URL: http://card-limits-service:8082
+      CARD_CURRENCY_SERVICE_URL: http://card-currency-service:8086
       SERVER_PORT: 8085
     ports:
       - "8085:8085"
