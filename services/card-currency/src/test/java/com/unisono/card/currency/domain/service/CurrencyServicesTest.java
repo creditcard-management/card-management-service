@@ -83,6 +83,25 @@ class CurrencyServicesTest {
         }
 
         @Test
+        void verifySystemCurrencyPassesWhenRegisteredAndActive() {
+            catalog.verifySystemCurrency();
+        }
+
+        @Test
+        void verifySystemCurrencyFailsWhenMissingOrInactive() {
+            CurrencyCatalogService withBrl = new CurrencyCatalogService(currencies, clock, "BRL");
+            assertThatThrownBy(withBrl::verifySystemCurrency)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("BRL").hasMessageContaining("not registered");
+
+            // Inactiva solo puede quedar por un cambio directo en la base: deactivate() no lo permite
+            currencies.save(SupportedCurrency.restore("ARS", "Peso argentino", false, T0, T0));
+            assertThatThrownBy(catalog::verifySystemCurrency)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("inactive");
+        }
+
+        @Test
         void unknownCurrencyIsNotFound() {
             assertThatThrownBy(() -> catalog.get("BRL")).isInstanceOf(NotFoundException.class);
         }
