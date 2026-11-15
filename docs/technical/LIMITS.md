@@ -465,7 +465,7 @@ Transactional outbox de card-limits (V15), con la misma estructura que `outbox_e
 |---|---|
 | `server.port` | `8082` |
 | `spring.datasource.url` | `jdbc:postgresql://localhost:5432/card_management_db` |
-| `spring.datasource.username` / `password` | `card_user` / `card_pass` |
+| `spring.datasource.username` / `password` | `${DB_USERNAME:postgres}` / `${DB_PASSWORD:postgres}` (el usuario que crea `card-management-database`; docker-compose los fija con `SPRING_DATASOURCE_*`) |
 | `spring.jpa.hibernate.ddl-auto` | `validate` |
 | `spring.kafka.bootstrap-servers` | `localhost:9092` (docker-compose: `kafka:9092`) |
 | `card.limits.outbox.poll-interval-ms` / `batch-size` | `1000` / `50` |

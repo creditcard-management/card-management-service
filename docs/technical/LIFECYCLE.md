@@ -474,7 +474,7 @@ Consultas (`JpaStateTransitionRepository`): por tarjeta (desc), solo exitosas, s
 |---|---|
 | `server.port` | `8083` |
 | `spring.datasource.url` | `jdbc:postgresql://localhost:5432/card_management_db` |
-| `spring.datasource.username` / `password` | `card_user` / `card_pass` |
+| `spring.datasource.username` / `password` | `${DB_USERNAME:postgres}` / `${DB_PASSWORD:postgres}` (el usuario que crea `card-management-database`; docker-compose los fija con `SPRING_DATASOURCE_*`) |
 | `spring.jpa.hibernate.ddl-auto` | `validate` |
 | `spring.kafka.bootstrap-servers` | `localhost:9092` |
 | `spring.kafka.consumer.group-id` | `card-lifecycle-consumer-group` |

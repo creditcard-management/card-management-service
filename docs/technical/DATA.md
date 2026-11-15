@@ -630,7 +630,7 @@ Cambiar el PIN no publica ningún evento.
 |---|---|
 | `server.port` | `8081` |
 | `spring.datasource.url` | `jdbc:postgresql://localhost:5432/card_management_db` |
-| `spring.datasource.username` / `password` | `card_user` / `card_pass` |
+| `spring.datasource.username` / `password` | `${DB_USERNAME:postgres}` / `${DB_PASSWORD:postgres}` (el usuario que crea `card-management-database`; docker-compose los fija con `SPRING_DATASOURCE_*`) |
 | `spring.datasource.hikari.*` | pool 10, min idle 5, pool `CardManagementHikariCP` |
 | `spring.jpa.hibernate.ddl-auto` | `validate` |
 | `spring.flyway.enabled` | `false` |
