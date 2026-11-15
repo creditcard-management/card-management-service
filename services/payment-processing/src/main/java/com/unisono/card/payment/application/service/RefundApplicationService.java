@@ -73,9 +73,10 @@ public class RefundApplicationService implements ProcessRefundUseCase {
             // 5. Persist refund transaction
             Transaction savedRefund = transactionRepository.save(refundTransaction);
 
-            // 6. Publish domain events
-            eventPublisher.publishAll(savedRefund.getDomainEvents());
-            savedRefund.clearDomainEvents();
+            // 6. Publish domain events (the ones the operation recorded on the aggregate: the one save()
+            // returns is rebuilt from the database and has none)
+            eventPublisher.publishAll(refundTransaction.getDomainEvents());
+            refundTransaction.clearDomainEvents();
 
             log.info("Refund processed successfully: {}", savedRefund.getTransactionId());
             return savedRefund;
