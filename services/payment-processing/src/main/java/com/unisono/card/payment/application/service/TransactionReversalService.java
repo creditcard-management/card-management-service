@@ -54,9 +54,10 @@ public class TransactionReversalService implements ReverseTransactionUseCase {
             // 4. Persist reversed transaction
             Transaction savedTransaction = transactionRepository.save(transaction);
 
-            // 5. Publish domain events
-            eventPublisher.publishAll(savedTransaction.getDomainEvents());
-            savedTransaction.clearDomainEvents();
+            // 5. Publish domain events (the ones the operation recorded on the aggregate: the one save()
+            // returns is rebuilt from the database and has none)
+            eventPublisher.publishAll(transaction.getDomainEvents());
+            transaction.clearDomainEvents();
 
             log.info("Transaction reversed successfully: {}", transactionId);
             return savedTransaction;

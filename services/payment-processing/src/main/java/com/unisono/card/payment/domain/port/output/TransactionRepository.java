@@ -15,7 +15,10 @@ import java.util.Optional;
 public interface TransactionRepository {
 
     /**
-     * Save a transaction
+     * Save a transaction.
+     * <p>
+     * Returns the transaction as it was stored (rebuilt from the database, with the new version). It does
+     * <b>not</b> carry the pending domain events: publish the events of the transaction passed in.
      */
     Transaction save(Transaction transaction);
 
