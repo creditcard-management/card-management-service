@@ -76,6 +76,26 @@ public class CurrencyCatalogService implements ManageCurrenciesUseCase {
     }
 
     /**
+     * Verifica que la moneda del sistema ({@code card.currency.system-currency}) esté dada de alta y activa. Si no,
+     * ninguna conversión hacia la moneda de los límites funcionaría: se llama al arrancar para fallar enseguida.
+     *
+     * @throws IllegalStateException si la moneda no está en el catálogo o está inactiva
+     */
+    public void verifySystemCurrency() {
+        String code = systemCurrency.getCurrencyCode();
+        SupportedCurrency currency = currencyRepository.findByCode(code)
+                .orElseThrow(() -> new IllegalStateException(String.format(
+                        "System currency %s (card.currency.system-currency) is not registered in the currencies "
+                                + "table: apply migration V19 or register it", code)));
+        if (!currency.isActive()) {
+            throw new IllegalStateException(String.format(
+                    "System currency %s (card.currency.system-currency) is inactive: set active = true in the "
+                            + "currencies table", code));
+        }
+        log.info("System currency {} is registered and active", code);
+    }
+
+    /**
      * Devuelve la moneda si está dada de alta y activa.
      */
     public Currency requireActive(Currency currency) {

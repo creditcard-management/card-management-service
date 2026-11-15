@@ -17,9 +17,13 @@ public interface JpaExchangeRateRepository extends JpaRepository<ExchangeRateEnt
     /**
      * Lock de Postgres por par hasta el fin de la transacción. Serializa las publicaciones del par aunque todavía
      * no tenga una cotización abierta que bloquear con FOR UPDATE.
+     * <p>
+     * Versión de dos claves de Postgres: {@code namespace} identifica a card-currency (no comparte espacio con
+     * otros locks de la base) y {@code pairKey} al par, sin hash (ver {@code ExchangeRateRepositoryAdapter}).
      */
-    @Query(value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(:key))) AS pair_lock", nativeQuery = true)
-    Integer lockPair(@Param("key") String key);
+    @Query(value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(:namespace, :pairKey)) AS pair_lock",
+            nativeQuery = true)
+    Integer lockPair(@Param("namespace") int namespace, @Param("pairKey") int pairKey);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

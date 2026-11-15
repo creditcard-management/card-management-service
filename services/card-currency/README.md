@@ -11,11 +11,11 @@ Microservicio dueño de las monedas que acepta el sistema y de sus cotizaciones.
 | Swagger UI | `http://localhost:8086/swagger-ui.html` |
 | Tablas | `currencies`, `exchange_rates` (migración V19 de `card-management-database`) |
 | Kafka | No publica ni consume |
-| Depende de | `card-shared`. El pom también trae `card-events` y `spring-kafka`, que todavía no se usan |
+| Depende de | `card-shared` |
 
 ## Modelo
 
-- **Moneda** (`SupportedCurrency`): código ISO 4217, nombre y estado. Solo las activas se cotizan y convierten. Solo se aceptan monedas de 2 decimales (los montos del sistema usan siempre 2). La moneda del sistema (`card.currency.system-currency`, por defecto `ARS`, la de los límites de crédito) no se puede desactivar. La migración carga ARS, USD y EUR, sin cotizaciones; en desarrollo, `make seed-dev` de `card-management-database` carga USD/ARS y EUR/ARS.
+- **Moneda** (`SupportedCurrency`): código ISO 4217, nombre y estado. Solo las activas se cotizan y convierten. Solo se aceptan monedas de 2 decimales (los montos del sistema usan siempre 2). La moneda del sistema (`card.currency.system-currency`, por defecto `ARS`, la de los límites de crédito) no se puede desactivar; si al arrancar no está dada de alta o está inactiva, el servicio no arranca. La migración carga ARS, USD y EUR, sin cotizaciones; en desarrollo, `make seed-dev` de `card-management-database` carga USD/ARS y EUR/ARS.
 - **Cotización** (`ExchangeRate`): `1 base = rate quote`, con hasta 8 decimales y vigencia `[validFrom, validTo)`. Hay una sola cotización abierta (`validTo` nulo) por par: publicar una nueva cierra la anterior en el instante en que empieza la nueva. Cada par se cotiza en un solo sentido (si existe USD/ARS, publicar ARS/USD da 422). Las publicaciones y cancelaciones de un par (en cualquier sentido) se serializan con un lock de Postgres. Una cotización programada que todavía no empezó se puede cancelar; una vigente solo se reemplaza.
 - **Conversión**: usa la cotización directa del par y, si no hay, la inversa (dividiendo). El resultado se redondea a 2 decimales HALF_UP, como todo `Money`.
 
