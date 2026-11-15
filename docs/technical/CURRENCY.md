@@ -9,7 +9,7 @@
 | Puerto | `8086` |
 | Base paths REST | `/api/v1/currencies`, `/api/v1/exchange-rates` |
 | Base de datos | PostgreSQL `card_management_db` — tablas propias `currencies` y `exchange_rates` (migración V19). No lee tablas de otros módulos |
-| Mensajería | Ninguna: no publica ni consume. El pom trae `card-events` y `spring-kafka`, pero no se usan (§9) |
+| Mensajería | Ninguna: no publica ni consume (no tiene dependencias de Kafka ni de `card-events`, §9) |
 | Dependencias internas | `card-shared` (`Money`, excepciones `NotFoundException`, `ValidationException`, `InvalidValueObjectException`, `BusinessRuleException`) |
 | Swagger UI | `http://localhost:8086/swagger-ui.html` (OpenAPI en `/api-docs`) |
 
@@ -61,7 +61,8 @@ com.unisono.card.currency
     ├── adapter.output.persistence   CurrencyRepositoryAdapter, ExchangeRateRepositoryAdapter,
     │                                CurrencyEntity, ExchangeRateEntity,
     │                                JpaCurrencyRepository, JpaExchangeRateRepository
-    └── config                       CurrencyDatabaseConfig (JPA), ClockConfig (Clock UTC), SwaggerConfig
+    └── config                       CurrencyDatabaseConfig (JPA), ClockConfig (Clock UTC), SwaggerConfig,
+                                     SystemCurrencyCheck (verificación al arrancar)
 ```
 
 Los servicios reciben un `java.time.Clock` (bean `Clock.systemUTC()`), así los tests fijan la hora. `ExchangeRateService` y `CurrencyConversionService` dependen de `CurrencyCatalogService` (no del puerto) para usar `requireActive(...)`.
@@ -98,7 +99,7 @@ Moneda que el sistema acepta para operar.
 
 Solo se aceptan monedas de 2 decimales porque `Money` redondea todo a 2 (§3.3): una moneda sin decimales o con 3 quedaría mal representada. `restore` no aplica la regla, así una moneda cargada a mano en la base se sigue pudiendo leer.
 
-La **moneda del sistema** se configura con `card.currency.system-currency` (por defecto `ARS`): es la de los límites de crédito, por eso no se puede desactivar.
+La **moneda del sistema** se configura con `card.currency.system-currency` (por defecto `ARS`): es la de los límites de crédito, por eso no se puede desactivar. **Al arrancar**, `SystemCurrencyCheck` llama a `CurrencyCatalogService.verifySystemCurrency()`: si la moneda no está en el catálogo o está inactiva (solo puede pasar por un cambio directo en la base), la aplicación no arranca, con un mensaje que dice qué falta. Mejor eso que rechazar con 422 cada pago en otra moneda. Que coincida con la moneda de card-limits (ARS, fija en sus value objects) no se puede verificar desde acá (§9).
 
 ### 3.2 `ExchangeRate`
 
@@ -291,7 +292,7 @@ sequenceDiagram
     API->>S: publish(PublishRateCommand)
     S->>Cat: requireActive(base), requireActive(quote)
     S->>R: findOpenForUpdate(pair)
-    R->>DB: pg_advisory_xact_lock(hashtext('exchange_rates:ARS/USD'))
+    R->>DB: pg_advisory_xact_lock(CURR, clave de ARS/USD)
     R->>DB: SELECT … WHERE valid_to IS NULL FOR UPDATE
     opt sin abierta
         S->>R: existsForPair(ARS/USD) → 422 si el inverso está cotizado
@@ -306,7 +307,7 @@ sequenceDiagram
 
 Detalles:
 
-- **Concurrencia.** Dos publicaciones del mismo par se serializan con un *advisory lock* transaccional de Postgres sobre `"exchange_rates:<A>/<B>"`, con las dos monedas en orden alfabético: **el lock es el mismo para USD/ARS y ARS/USD**, así dos publicaciones simultáneas en sentidos contrarios no pueden saltear la regla de un solo sentido. Hace falta además del `FOR UPDATE` porque un par sin cotización abierta no tiene fila que bloquear. El lock se libera al terminar la transacción.
+- **Concurrencia.** Dos publicaciones del mismo par se serializan con un *advisory lock* transaccional de Postgres de dos claves: `pg_advisory_xact_lock(namespace, pairKey)`. `namespace` es la constante `0x43555252` ("CURR" en ASCII), así los locks de card-currency no comparten espacio con otros de la base. `pairKey` sale de los dos códigos sin hash: cada código de 3 letras es un número en base 26 (0 a 17.575) y la clave es `menor × 17.576 + mayor`. Es distinta para cada par (sin colisiones) y entra en un `int` (máximo 308.915.775). Como los códigos se ordenan, **el lock es el mismo para USD/ARS y ARS/USD**, así dos publicaciones simultáneas en sentidos contrarios no pueden saltear la regla de un solo sentido. Hace falta además del `FOR UPDATE` porque un par sin cotización abierta no tiene fila que bloquear. El lock se libera al terminar la transacción.
 - **La hora se toma después del lock**, así una publicación que esperaba el lock siempre arranca después de la que acaba de entrar y `supersededBy` no la rechaza.
 - **Orden de escritura.** `ExchangeRateRepositoryAdapter.save` usa `saveAndFlush`: el `UPDATE` que cierra la anterior llega a la base antes del `INSERT` de la nueva. Sin el flush, Hibernate ordenaría primero el `INSERT` y chocaría con el índice único `uq_exchange_rates_open_pair`.
 - **Cotizaciones futuras.** Con una cotización vigente desde ayer y una nueva con `effectiveFrom` mañana, la vigente queda cerrada en mañana y la nueva pasa a ser la abierta. Hasta mañana las conversiones siguen usando la anterior. Una vez programada, **no se puede publicar otra que empiece antes** (422): primero hay que cancelarla (§5.3).
@@ -427,7 +428,7 @@ La base **no impide** superposiciones entre cotizaciones cerradas del mismo par 
 
 | Método | Consulta |
 |---|---|
-| `lockPair(key)` | `SELECT pg_advisory_xact_lock(hashtext(:key))` (nativa) |
+| `lockPair(namespace, pairKey)` | `SELECT pg_advisory_xact_lock(:namespace, :pairKey)` (nativa; claves en §5.1) |
 | `findOpenForUpdate(base, quote)` | `valid_to IS NULL`, con `PESSIMISTIC_WRITE` (`FOR UPDATE`) |
 | `findValidAt(base, quote, at)` | `valid_from ≤ at AND (valid_to IS NULL OR valid_to > at)` |
 | `findByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc(…, Pageable)` | Historial paginado (solo la primera página, tamaño `limit`) |
@@ -498,7 +499,7 @@ La carpeta *5. card-currency* de la [colección de Postman](../postman/Card%20Ma
 ### 7.3 Observabilidad
 
 - `GET /actuator/health` (con detalles, incluye la base), `/actuator/info`, `/actuator/metrics`.
-- `INFO` al dar de alta o desactivar monedas, al publicar cotizaciones (par, tasa, vigencia y `rateId` reemplazado) y al cancelarlas (par, `rateId` y la anterior que se extendió); `DEBUG` en las conversiones inversas; `WARN` en cada 4xx y en los conflictos de concurrencia.
+- `INFO` al arrancar, con la moneda del sistema verificada; al dar de alta o desactivar monedas, al publicar cotizaciones (par, tasa, vigencia y `rateId` reemplazado) y al cancelarlas (par, `rateId` y la anterior que se extendió); `DEBUG` en las conversiones inversas; `WARN` en cada 4xx y en los conflictos de concurrencia.
 
 ### 7.4 Tests
 
@@ -509,9 +510,10 @@ mvn -pl services/card-currency -am test
 | Tests | Cubren |
 |---|---|
 | `CurrencyPairTest`, `ExchangeRateTest`, `SupportedCurrencyTest` | Códigos ISO, pares inválidos, precisión de tasas, vigencias, cierre, cancelación y extensión de cotizaciones, monedas de 2 decimales, moneda del sistema |
-| `CurrencyServicesTest` (con `InMemoryRepositories`) | Catálogo, publicación (inmediata, futura, retroactiva, monedas inactivas, par inverso), cancelación (abierta, en el medio, única, ya empezada), consulta con monedas inactivas, historial, conversión directa, inversa, identidad y en un instante |
+| `CurrencyServicesTest` (con `InMemoryRepositories`) | Catálogo, verificación de la moneda del sistema (registrada, ausente, inactiva), publicación (inmediata, futura, retroactiva, monedas inactivas, par inverso), cancelación (abierta, en el medio, única, ya empezada), consulta con monedas inactivas, historial, conversión directa, inversa, identidad y en un instante |
 | `CurrencyApiTest` | Endpoints (incluido el `DELETE`), Bean Validation y mapeo de errores (MockMvc) |
-| `CurrencyPersistenceTest` | Mapeo JPA contra el DDL de V19, vigencias, índice único de cotización abierta, cancelación con reapertura de la anterior y `existsForPair` (Testcontainers: **requiere Docker**) |
+| `CurrencyPersistenceTest` | Mapeo JPA contra el DDL de V19, vigencias, índice único de cotización abierta, cancelación con reapertura de la anterior, `existsForPair` y el advisory lock en `pg_locks` (namespace y clave, igual para los dos sentidos) (Testcontainers: **requiere Docker**) |
+| `PairLockKeyTest` | Clave del lock: igual para los dos sentidos, sin colisiones ni fuera de rango entre todos los pares de monedas ISO 4217 de la JVM |
 
 Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contrato REST y el mapeo de 404/422/5xx.
 
@@ -524,7 +526,7 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 | `payment-processing` | Llama a `POST /exchange-rates/convert` cuando la moneda del pago difiere de la del límite; guarda `appliedRate` y `rateId` en la transacción | Funciona ([PAYMENT.md §4 y §7](PAYMENT.md)) |
 | `card-limits` | Sin integración directa. Sus límites están en ARS, que es la `system-currency` de card-currency; las dos configuraciones deben coincidir a mano | Acoplamiento implícito por configuración |
 | `card-shared` | `Money` (escala 2), excepciones base | Funciona |
-| `card-events` | Dependencia en el pom, sin uso. No hay contratos `exchange-rate.*` | Pendiente |
+| `card-events` | Sin relación: no hay contratos `exchange-rate.*` (§9) | Pendiente |
 | `card-data`, `card-lifecycle` | Ninguna | — |
 
 ---
@@ -542,8 +544,7 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 ### 9.2 Técnicas
 
 6. **Sin seguridad.** Cualquiera con acceso de red puede publicar o cancelar cotizaciones y desactivar monedas; no hay autenticación, roles ni registro de quién publicó (`createdBy`).
-7. **Sin eventos.** Publicar o cancelar una cotización o cambiar el estado de una moneda no emite nada a Kafka, aunque `card-events` y `spring-kafka` estén en el pom (dependencias muertas).
-8. **Dependencia síncrona sin caché.** Cada pago en moneda extranjera hace una llamada REST; si card-currency no responde, el pago falla con 503. No hay caché local en `payment-processing` ni *circuit breaker* propio de esta integración.
-9. **Moneda del sistema duplicada.** `card.currency.system-currency` y la moneda de los VO de `card-limits` se configuran por separado; nada verifica que coincidan.
-10. **DDL de tests copiado a mano.** `src/test/resources/currency-schema.sql` es una copia manual de V19 (§6.4): si la migración cambia y la copia no, los tests de persistencia validan contra un esquema viejo.
-11. **Colisiones del advisory lock.** `hashtext` devuelve un `int4`: dos pares distintos pueden compartir lock y serializarse entre sí. No es incorrecto, solo reduce concurrencia (irrelevante con el volumen actual).
+7. **Sin eventos.** Publicar o cancelar una cotización o cambiar el estado de una moneda no emite nada a Kafka. Publicarlos (`exchange-rate.published` / `.cancelled`, `currency.deactivated`) necesita un transactional outbox como el de card-limits (migración, relay y limpieza); conviene hacerlo cuando haya un consumidor. El módulo ya no declara `card-events` ni `spring-kafka`.
+8. **Dependencia síncrona sin caché.** Cada pago en moneda extranjera hace una llamada REST; si card-currency no responde, el pago falla con 503 (el `RestTemplate` de payment-processing corta a los 5 s de conexión y 10 s de lectura). No hay caché local ni *circuit breaker* de esta integración: una caché de cotizaciones podría cobrar con una tasa reemplazada.
+9. **Moneda del sistema contra la de card-limits.** card-currency verifica al arrancar que su `system-currency` exista y esté activa (§3.1), pero no que sea la misma que la de card-limits, que tiene ARS fija en sus value objects y no la expone. Si una cambia, la otra se tiene que cambiar a mano.
+10. **DDL de tests copiado a mano.** `src/test/resources/currency-schema.sql` es una copia manual de V19 (§6.4): si la migración cambia y la copia no, los tests de persistencia validan contra un esquema viejo. Se podría usar la imagen de Flyway de `card-management-database` con Testcontainers, pero hoy no se publica en ningún registry.
