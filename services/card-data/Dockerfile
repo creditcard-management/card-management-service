@@ -36,7 +36,7 @@ WORKDIR /app
 
 COPY --from=builder /build/services/card-data/target/*.jar app.jar
 
-EXPOSE 8080
+EXPOSE 8081
 
 ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -Djava.security.egd=file:/dev/./urandom"
 
