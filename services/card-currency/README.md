@@ -33,6 +33,8 @@ Microservicio dueño de las monedas que acepta el sistema y de sus cotizaciones.
 
 Errores: 400 validación, 404 sin moneda o sin cotización, 409 moneda duplicada, 422 moneda no soportada o regla de negocio.
 
+Todos los endpoints están en la carpeta *5. card-currency* de la [colección de Postman](../../docs/postman/Card%20Management%20System.postman_collection.json); el flujo de punta a punta (carpeta 0) publica una cotización USD/ARS y hace una compra y una devolución en USD.
+
 ```bash
 curl -X POST localhost:8086/api/v1/exchange-rates -H 'Content-Type: application/json' \
   -d '{"baseCurrency":"USD","quoteCurrency":"ARS","rate":1150.50}'

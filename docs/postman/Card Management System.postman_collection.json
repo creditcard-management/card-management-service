@@ -2,13 +2,13 @@
   "info": {
     "_postman_id": "2bb48592-f372-41e9-bcf1-d88439615e29",
     "name": "Card Management System",
-    "description": "Colección de los 4 microservicios: card-data (8081), card-limits (8082), card-lifecycle (8083) y payment-processing (8085).\n\nLa carpeta 0 es un flujo de punta a punta para el Collection Runner; las carpetas 1 a 4 tienen el resto de los endpoints de cada servicio y reusan las variables que deja el flujo. La API no tiene autenticación.",
+    "description": "Colección de los 5 microservicios: card-data (8081), card-limits (8082), card-lifecycle (8083), payment-processing (8085) y card-currency (8086).\n\nLa carpeta 0 es un flujo de punta a punta para el Collection Runner; las carpetas 1 a 5 tienen el resto de los endpoints de cada servicio y reusan las variables que deja el flujo. La API no tiene autenticación.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
       "name": "0. Flujo punta a punta",
-      "description": "Correr la carpeta completa con el Collection Runner, en orden. Cada request valida el código HTTP y guarda en variables de la colección los ids que usan los siguientes (card_id, credit_limit_id, tx_*).\n\nRecorrido: alta → aprobación → límite de crédito → emisión → activación → compras, devolución, reverso, preautorización/captura y liquidación → pago del resumen → bloqueo, desbloqueo, bloqueo por fraude (no se puede desbloquear) → cancelación → historial.\n\nRequiere los 4 servicios levantados (8081, 8082, 8083, 8085) y Kafka: el historial de card-lifecycle y la lectura de `cards` en card-limits dependen de los eventos.\n\nLos pagos necesitan el comercio MERCH-001 y las terminales POS-0001 / ATM-0001 activos en la base: cargarlos con docs/postman/dev-seed-merchants.sql.",
+      "description": "Correr la carpeta completa con el Collection Runner, en orden. Cada request valida el código HTTP y guarda en variables de la colección los ids que usan los siguientes (card_id, credit_limit_id, tx_*).\n\nRecorrido: alta → aprobación → límite de crédito → emisión → activación → compras, devolución, reverso, compra en USD convertida con card-currency, preautorización/captura y liquidación → pago del resumen → bloqueo, desbloqueo, bloqueo por fraude (no se puede desbloquear) → cancelación → historial.\n\nRequiere los 5 servicios levantados (8081, 8082, 8083, 8085, 8086) y Kafka: el historial de card-lifecycle y la lectura de `cards` en card-limits dependen de los eventos.\n\nLos pagos necesitan el comercio MERCH-001 y las terminales POS-0001 / ATM-0001 activos en la base: cargarlos con docs/postman/dev-seed-merchants.sql.",
       "item": [
         {
           "name": "01 Alta de tarjeta (card-data)",
@@ -529,7 +529,185 @@
           ]
         },
         {
-          "name": "12 Reverso de la compra online (payment)",
+          "name": "12 Publicar cotización USD/ARS (card-currency)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseCurrency\": \"USD\",\n  \"quoteCurrency\": \"ARS\",\n  \"rate\": 1150.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cierra la cotización USD/ARS vigente y abre esta desde ahora. Los pagos en USD se convierten a la moneda del límite (ARS) con la cotización vigente."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('usd_rate_id', pm.response.json().rateId);",
+                  "pm.collectionVariables.set('usd_rate', pm.response.json().rate);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13 Compra en USD (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/purchase",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"cardholderName\": \"JUAN PEREZ\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 20.0,\n  \"currency\": \"USD\",\n  \"merchantId\": \"MERCH-001\",\n  \"merchantName\": \"Duty Free\",\n  \"merchantCategoryCode\": \"5411\",\n  \"merchantCity\": \"CABA\",\n  \"merchantCountry\": \"AR\",\n  \"paymentMethod\": \"CHIP\",\n  \"terminalId\": \"POS-0001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "card-currency convierte USD 20 a ARS con la cotización vigente; card-limits consume el monto en ARS. Sin cotización para el par responde 422 CURRENCY_NOT_SUPPORTED."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tx_usd_id', pm.response.json().transactionId);",
+                  "pm.test('Aprobada en USD', () => pm.expect(pm.response.json().currency).to.eql('USD'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14 Ver la compra en USD convertida (payment)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/transactions/{{tx_usd_id}}",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "transactions",
+                "{{tx_usd_id}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const tx = pm.response.json();",
+                  "const expected = Math.round(20 * Number(pm.collectionVariables.get('usd_rate')) * 100) / 100;",
+                  "pm.test('Cobrada en ARS', () => pm.expect(tx.localCurrency).to.eql('ARS'));",
+                  "pm.test('Monto convertido con la cotización', () => pm.expect(tx.localAmount).to.eql(expected));",
+                  "pm.test('Guarda la cotización usada', () => pm.expect(tx.exchangeRateId).to.eql(pm.collectionVariables.get('usd_rate_id')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15 Devolución parcial en USD (payment)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/refunds/partial",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "refunds",
+                "partial"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalTransactionId\": \"{{tx_usd_id}}\",\n  \"cardId\": \"{{card_id}}\",\n  \"refundAmount\": 5.0,\n  \"currency\": \"USD\",\n  \"merchantId\": \"MERCH-001\",\n  \"reason\": \"Producto devuelto\",\n  \"initiatedBy\": \"MERCH-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Va en la moneda de la compra original y restaura el crédito con la tasa de la compra, no la de hoy."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.test('En la moneda original', () => pm.expect(pm.response.json().currency).to.eql('USD'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16 Reverso de la compra online (payment)",
           "request": {
             "method": "POST",
             "header": [
@@ -573,7 +751,7 @@
           ]
         },
         {
-          "name": "13 Preautorizar (payment)",
+          "name": "17 Preautorizar (payment)",
           "request": {
             "method": "POST",
             "header": [
@@ -620,7 +798,7 @@
           ]
         },
         {
-          "name": "14 Capturar la preautorización (payment)",
+          "name": "18 Capturar la preautorización (payment)",
           "request": {
             "method": "POST",
             "header": [],
@@ -652,7 +830,7 @@
           ]
         },
         {
-          "name": "15 Liquidar en lote (payment)",
+          "name": "19 Liquidar en lote (payment)",
           "request": {
             "method": "POST",
             "header": [
@@ -675,7 +853,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"transactionIds\": [\n    \"{{tx_purchase_id}}\",\n    \"{{tx_preauth_id}}\"\n  ],\n  \"initiatedBy\": \"batch\"\n}",
+              "raw": "{\n  \"transactionIds\": [\n    \"{{tx_purchase_id}}\",\n    \"{{tx_preauth_id}}\",\n    \"{{tx_usd_id}}\"\n  ],\n  \"initiatedBy\": \"batch\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -697,7 +875,7 @@
           ]
         },
         {
-          "name": "16 Resumen de transacciones (payment)",
+          "name": "20 Resumen de transacciones (payment)",
           "request": {
             "method": "GET",
             "header": [],
@@ -730,7 +908,7 @@
           ]
         },
         {
-          "name": "17 Pago del resumen (card-limits)",
+          "name": "21 Pago del resumen (card-limits)",
           "request": {
             "method": "POST",
             "header": [
@@ -776,7 +954,7 @@
           ]
         },
         {
-          "name": "18 Historial del límite (card-limits)",
+          "name": "22 Historial del límite (card-limits)",
           "request": {
             "method": "GET",
             "header": [],
@@ -808,7 +986,7 @@
           ]
         },
         {
-          "name": "19 Bloquear (card-lifecycle)",
+          "name": "23 Bloquear (card-lifecycle)",
           "request": {
             "method": "POST",
             "header": [
@@ -854,7 +1032,7 @@
           ]
         },
         {
-          "name": "20 Desbloquear (card-lifecycle)",
+          "name": "24 Desbloquear (card-lifecycle)",
           "request": {
             "method": "POST",
             "header": [
@@ -900,7 +1078,7 @@
           ]
         },
         {
-          "name": "21 Bloquear por fraude (card-lifecycle)",
+          "name": "25 Bloquear por fraude (card-lifecycle)",
           "request": {
             "method": "POST",
             "header": [
@@ -946,7 +1124,7 @@
           ]
         },
         {
-          "name": "22 Desbloquear un bloqueo por fraude → 422 (card-lifecycle)",
+          "name": "26 Desbloquear un bloqueo por fraude → 422 (card-lifecycle)",
           "request": {
             "method": "POST",
             "header": [
@@ -993,7 +1171,7 @@
           ]
         },
         {
-          "name": "23 Cancelar (card-lifecycle)",
+          "name": "27 Cancelar (card-lifecycle)",
           "request": {
             "method": "POST",
             "header": [
@@ -1039,7 +1217,7 @@
           ]
         },
         {
-          "name": "24 Historial de estados (card-lifecycle)",
+          "name": "28 Historial de estados (card-lifecycle)",
           "request": {
             "method": "GET",
             "header": [],
@@ -2403,6 +2581,53 @@
           ]
         },
         {
+          "name": "Compra en dólares",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payment_url}}/api/v1/payments/purchase",
+              "host": [
+                "{{payment_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "purchase"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardId\": \"{{card_id}}\",\n  \"cardNumberToken\": \"TKN-{{card_id}}\",\n  \"lastFourDigits\": \"{{last_four}}\",\n  \"cardholderName\": \"JUAN PEREZ\",\n  \"expirationDate\": \"{{expiration_month}}/{{expiration_year}}\",\n  \"amount\": 20.0,\n  \"currency\": \"USD\",\n  \"merchantId\": \"MERCH-001\",\n  \"merchantName\": \"Duty Free\",\n  \"merchantCategoryCode\": \"5411\",\n  \"merchantCity\": \"CABA\",\n  \"merchantCountry\": \"AR\",\n  \"paymentMethod\": \"CHIP\",\n  \"terminalId\": \"POS-0001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Se cobra en la moneda del límite: card-currency convierte con la cotización vigente (422 CURRENCY_NOT_SUPPORTED si no hay). localAmount, localCurrency y exchangeRate del request se ignoran."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('tx_usd_id', pm.response.json().transactionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Adelanto en efectivo",
           "request": {
             "method": "POST",
@@ -2842,6 +3067,581 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "5. card-currency",
+      "description": "Endpoints de card-currency (8086): catálogo de monedas, cotizaciones por par con vigencia y conversión. La moneda del sistema (ARS, la de los límites) no se puede desactivar. Una cotización `1 base = rate quote` rige desde `effectiveFrom` (ahora si se omite) hasta que se publica la siguiente del par; no se aceptan fechas pasadas. La conversión usa la cotización directa del par y, si no hay, la inversa.",
+      "item": [
+        {
+          "name": "Listar monedas activas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/currencies?activeOnly=true",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "currencies"
+              ],
+              "query": [
+                {
+                  "key": "activeOnly",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver moneda",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/currencies/USD",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "currencies",
+                "USD"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dar de alta una moneda",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/currencies",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "currencies"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"BRL\",\n  \"name\": \"Real brasileño\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Queda activa. Si ya está dada de alta responde 409."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 o 409 si ya existe', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Activar moneda",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/currencies/BRL/activate",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "currencies",
+                "BRL",
+                "activate"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar moneda",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/currencies/BRL/deactivate",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "currencies",
+                "BRL",
+                "deactivate"
+              ]
+            },
+            "description": "Una moneda inactiva no se cotiza ni se convierte: los pagos en esa moneda responden 422."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desactivar la moneda del sistema → 422",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/currencies/ARS/deactivate",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "currencies",
+                "ARS",
+                "deactivate"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publicar cotización",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseCurrency\": \"USD\",\n  \"quoteCurrency\": \"ARS\",\n  \"rate\": 1150.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cierra la cotización vigente del par y abre esta desde ahora."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('usd_rate_id', pm.response.json().rateId);",
+                  "pm.collectionVariables.set('usd_rate', pm.response.json().rate);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Programar cotización a futuro",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"baseCurrency\": \"EUR\",\n  \"quoteCurrency\": \"USD\",\n  \"rate\": 1.08,\n  \"effectiveFrom\": \"{{effective_from}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Rige desde effectiveFrom (mañana). Mientras tanto sigue la anterior del par; una publicación inmediata de EUR/USD responde 422 porque arrancaría antes que esta."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mañana a esta hora: la cotización queda programada y rige recién desde ahí",
+                  "pm.collectionVariables.set('effective_from', new Date(Date.now() + 24 * 3600 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cotización vigente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/USD/ARS",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "USD",
+                "ARS"
+              ]
+            },
+            "description": "Solo el par pedido, sin invertir. 404 si no hay cotización."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cotización en un instante",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/USD/ARS?at={{rate_at}}",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "USD",
+                "ARS"
+              ],
+              "query": [
+                {
+                  "key": "at",
+                  "value": "{{rate_at}}"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Instante actual en ISO-8601 para consultar la cotización vigente en ese momento",
+                  "pm.collectionVariables.set('rate_at', new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Historial del par",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/USD/ARS/history?limit=10",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "USD",
+                "ARS",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "De la más nueva a la más vieja."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Convertir USD → ARS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/convert",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "convert"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100.0,\n  \"fromCurrency\": \"USD\",\n  \"toCurrency\": \"ARS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Cotización directa', () => pm.expect(pm.response.json().inverse).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Convertir ARS → USD (cotización inversa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/convert",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "convert"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 115050.0,\n  \"fromCurrency\": \"ARS\",\n  \"toCurrency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Usa la inversa de USD/ARS', () => pm.expect(pm.response.json().inverse).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Convertir a una moneda no soportada → 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{currency_url}}/api/v1/exchange-rates/convert",
+              "host": [
+                "{{currency_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "exchange-rates",
+                "convert"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100.0,\n  \"fromCurrency\": \"USD\",\n  \"toCurrency\": \"JPY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -2860,6 +3660,10 @@
     {
       "key": "payment_url",
       "value": "http://localhost:8085"
+    },
+    {
+      "key": "currency_url",
+      "value": "http://localhost:8086"
     },
     {
       "key": "client_id",
@@ -2919,6 +3723,26 @@
     },
     {
       "key": "pin_key_id",
+      "value": ""
+    },
+    {
+      "key": "tx_usd_id",
+      "value": ""
+    },
+    {
+      "key": "usd_rate_id",
+      "value": ""
+    },
+    {
+      "key": "usd_rate",
+      "value": ""
+    },
+    {
+      "key": "rate_at",
+      "value": ""
+    },
+    {
+      "key": "effective_from",
       "value": ""
     }
   ]

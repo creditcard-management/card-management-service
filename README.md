@@ -82,7 +82,7 @@ Los tests de persistencia usan Testcontainers, así que necesitan Docker.
 ## Probar la API
 
 - **Swagger UI:** `http://localhost:<puerto>/swagger-ui.html` en cada servicio (8081, 8082, 8083, 8085, 8086).
-- **Postman:** [`docs/postman/Card Management System.postman_collection.json`](docs/postman/Card%20Management%20System.postman_collection.json). La carpeta *0. Flujo punta a punta* recorre alta, aprobación, límite, emisión, activación, pagos, bloqueos y cancelación con el Collection Runner. Sin Postman instalado:
+- **Postman:** [`docs/postman/Card Management System.postman_collection.json`](docs/postman/Card%20Management%20System.postman_collection.json). La carpeta *0. Flujo punta a punta* recorre alta, aprobación, límite, emisión, activación, pagos (incluida una compra en USD convertida con card-currency), bloqueos y cancelación con el Collection Runner. Las carpetas 1 a 5 tienen el resto de los endpoints de cada servicio. Sin Postman instalado:
   ```bash
   docker run --rm --network host -v "$PWD/docs/postman:/etc/newman" postman/newman:6-alpine \
     run "Card Management System.postman_collection.json" --folder "0. Flujo punta a punta"
