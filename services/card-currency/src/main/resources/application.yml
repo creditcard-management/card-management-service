@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: card-currency
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/card_management_db
+    username: card_user
+    password: card_pass
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      pool-name: CurrencyHikariCP
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: false
+
+card:
+  currency:
+    system-currency: ARS      # Moneda de los límites de crédito; no se puede desactivar
+    history-max-size: 100     # Máximo de cotizaciones por consulta de historial
+
+server:
+  port: 8086
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    com.unisono.card: DEBUG
