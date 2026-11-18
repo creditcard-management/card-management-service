@@ -8,15 +8,14 @@ import lombok.Getter;
 import java.io.Serializable;
 
 /**
- * Value Object que representa el límite de compras
+ * Value Object que representa el límite de compras.
+ * El rango depende de la moneda ({@link LimitPolicy}) y se valida al asignar o modificar el límite.
  */
 @Getter
 @EqualsAndHashCode
 public class PurchaseLimit implements Serializable {
 
     private static final long serialVersionUID = 1L;
-    private static final Money MIN_LIMIT = Money.ofARS(1000);      // $1,000 mínimo
-    private static final Money MAX_LIMIT = Money.ofARS(10_000_000); // $10M máximo
 
     private final Money amount;
 
@@ -24,54 +23,41 @@ public class PurchaseLimit implements Serializable {
         this.amount = amount;
     }
 
-    public static PurchaseLimit of(Money amount) {
-        validate(amount);
+    /**
+     * Crea un límite nuevo validando el rango de la política de su moneda
+     */
+    public static PurchaseLimit of(Money amount, LimitPolicy policy) {
+        requireNonNull(amount);
+        policy.checkPurchaseLimit(amount);
         return new PurchaseLimit(amount);
     }
 
-    public static PurchaseLimit zero() {
-        return of(Money.zero());
+    /**
+     * Reconstruye desde persistencia, sin validar el rango: el límite pudo asignarse con reglas anteriores
+     */
+    public static PurchaseLimit reconstituteFromPersistence(Money amount) {
+        requireNonNull(amount);
+        return new PurchaseLimit(amount);
     }
 
-    private static void validate(Money amount) {
+    private static void requireNonNull(Money amount) {
         if (amount == null) {
             throw new ValidationException("El límite de compras no puede ser nulo");
         }
-
-        if (amount.isLessThan(MIN_LIMIT)) {
-            throw new ValidationException(
-                    String.format("El límite de compras debe ser al menos %s", MIN_LIMIT)
-            );
-        }
-
-        if (amount.isGreaterThan(MAX_LIMIT)) {
-            throw new ValidationException(
-                    String.format("El límite de compras no puede exceder %s", MAX_LIMIT)
-            );
-        }
     }
 
     /**
-     * Aumenta el límite
+     * Aumenta el límite (el resultado debe quedar dentro del rango de la política)
      */
-    public PurchaseLimit increase(Money additionalAmount) {
-        Money newAmount = this.amount.add(additionalAmount);
-        return of(newAmount);
+    public PurchaseLimit increase(Money additionalAmount, LimitPolicy policy) {
+        return of(this.amount.add(additionalAmount), policy);
     }
 
     /**
-     * Disminuye el límite
+     * Disminuye el límite (el resultado debe quedar dentro del rango de la política)
      */
-    public PurchaseLimit decrease(Money reductionAmount) {
-        Money newAmount = this.amount.subtract(reductionAmount);
-        return of(newAmount);
-    }
-
-    /**
-     * Verifica si un monto está dentro del límite
-     */
-    public boolean allows(Money purchaseAmount) {
-        return !purchaseAmount.isGreaterThan(this.amount);
+    public PurchaseLimit decrease(Money reductionAmount, LimitPolicy policy) {
+        return of(this.amount.subtract(reductionAmount), policy);
     }
 
     @Override

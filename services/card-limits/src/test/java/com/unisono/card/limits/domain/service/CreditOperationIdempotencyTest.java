@@ -1,5 +1,6 @@
 package com.unisono.card.limits.domain.service;
 
+import com.unisono.card.limits.domain.model.TestLimitPolicies;
 import com.unisono.card.limits.domain.exception.CreditOperationCancelledException;
 import com.unisono.card.limits.domain.model.CreditLimit;
 import com.unisono.card.limits.domain.model.CreditLimitHistory;
@@ -54,8 +55,9 @@ class CreditOperationIdempotencyTest {
     void setUp() {
         when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(true);
         service = new CreditLimitManagementService(creditLimits, cardValidationPort, operations,
-                new CreditLimitEventEmitter((topic, key, event) -> outbox.add(Map.entry(topic, event))));
-        creditLimit = creditLimits.save(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test"));
+                new CreditLimitEventEmitter((topic, key, event) -> outbox.add(Map.entry(topic, event))),
+                TestLimitPolicies.port());
+        creditLimit = creditLimits.save(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test"));
     }
 
     @Test
@@ -293,7 +295,7 @@ class CreditOperationIdempotencyTest {
     void shouldRejectCancellingAnOperationOfAnotherCreditLimit() {
         service.consumeForPurchase(consume("op-1", 20_000));
         CreditLimit other = creditLimits.save(CreditLimit.assign(
-                CardId.of("660e8400-e29b-41d4-a716-446655440000"), Money.ofARS(100_000), 0.3, "test"));
+                CardId.of("660e8400-e29b-41d4-a716-446655440000"), Money.ofARS(100_000), 0.3, TestLimitPolicies.ars(), "test"));
 
         assertThatThrownBy(() -> service.cancelOperation(new CancelOperationCommand(other.getId(), "op-1")))
                 .isInstanceOf(BusinessRuleException.class);
@@ -424,16 +426,81 @@ class CreditOperationIdempotencyTest {
     }
 
     @Test
-    void refundOfSomethingAlreadyPaidPublishesNothing() {
+    void refundOfSomethingAlreadyPaidCreditsTheBalanceAndPublishesReleased() {
         service.consumeForPurchase(consume("op-1", 20_000));
         service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(20_000), "pago del resumen"));
         outbox.clear();
 
-        // Lo consumido ya es cero: la devolución no baja nada (no hay saldo a favor)
+        // Lo consumido ya es cero: la devolución queda como saldo a favor
         service.restoreCredit(new RestoreCreditCommand(creditLimit.getId(), Money.ofARS(20_000), LocalDate.now(),
                 "devolución", "op-2"));
 
-        assertThat(outbox).isEmpty();
+        assertThat(outbox).extracting(Map.Entry::getKey).containsExactly(KafkaTopics.CREDIT_LIMIT_RELEASED);
+        CreditLimitReleasedEvent refund = (CreditLimitReleasedEvent) outbox.get(0).getValue();
+        assertThat(refund.getOperationType()).isEqualTo("REFUND");
+        assertThat(refund.getAmount()).isEqualByComparingTo("20000");
+        assertThat(refund.getConsumedAmount()).isEqualByComparingTo("0");
+        assertThat(refund.getCreditBalanceAmount()).isEqualByComparingTo("20000");
+        assertThat(refund.getAvailableAmount()).isEqualByComparingTo("520000");
+    }
+
+    @Test
+    void aPurchasePaidWithTheBalancePublishesConsumedAndRecordsTheBalanceDelta() {
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(5_000), "pago anticipado"));
+        outbox.clear();
+
+        service.consumeForPurchase(consume("op-1", 3_000));
+
+        CreditLimit limit = creditLimits.findById(creditLimit.getId()).orElseThrow();
+        assertThat(limit.getConsumedCredit().getAmount().isZero()).isTrue();
+        assertThat(limit.getCreditBalance().getAmount()).isEqualTo(Money.ofARS(2_000));
+        CreditOperation operation = operations.findById("op-1").orElseThrow();
+        assertThat(operation.getCreditDelta().isZero()).isTrue();
+        assertThat(operation.getBalanceDelta()).isEqualTo(Money.ofARS(-3_000));
+        CreditLimitConsumedEvent consumed = (CreditLimitConsumedEvent) outbox.get(0).getValue();
+        assertThat(consumed.getAmount()).isEqualByComparingTo("3000");
+        assertThat(consumed.getCreditBalanceAmount()).isEqualByComparingTo("2000");
+    }
+
+    @Test
+    void cancellingAPurchasePaidWithTheBalanceGivesTheBalanceBack() {
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(5_000), "pago anticipado"));
+        service.consumeForPurchase(consume("op-1", 8_000)); // 5.000 del saldo + 3.000 de deuda
+
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "op-1"));
+
+        CreditLimit limit = creditLimits.findById(creditLimit.getId()).orElseThrow();
+        assertThat(limit.getConsumedCredit().getAmount().isZero()).isTrue();
+        assertThat(limit.getCreditBalance().getAmount()).isEqualTo(Money.ofARS(5_000));
+        assertThat(limit.getAvailableCredit().getAmount()).isEqualTo(Money.ofARS(505_000));
+    }
+
+    @Test
+    void cancellingAPurchaseThatWasAlreadyPaidCreditsItsAmount() {
+        service.consumeForPurchase(consume("op-1", 20_000));
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(20_000), "pago del resumen"));
+
+        // La compra se anula después de pagada: el cliente pagó algo que no existió
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "op-1"));
+
+        CreditLimit limit = creditLimits.findById(creditLimit.getId()).orElseThrow();
+        assertThat(limit.getConsumedCredit().getAmount().isZero()).isTrue();
+        assertThat(limit.getCreditBalance().getAmount()).isEqualTo(Money.ofARS(20_000));
+    }
+
+    @Test
+    void cancellingAnOverpaymentAfterTheBalanceWasSpentLeavesDebt() {
+        service.consumeForPurchase(consume("op-1", 10_000));
+        service.releaseCredit(new ReleaseCreditCommand(creditLimit.getId(), Money.ofARS(15_000), "pago", "pay-1"));
+        service.consumeForPurchase(consume("op-2", 5_000)); // usa los 5.000 de saldo a favor
+
+        // El pago se rechazó después: vuelve toda la deuda que cancelaba
+        service.cancelOperation(new CancelOperationCommand(creditLimit.getId(), "pay-1"));
+
+        CreditLimit limit = creditLimits.findById(creditLimit.getId()).orElseThrow();
+        assertThat(limit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(15_000));
+        assertThat(limit.getCreditBalance().getAmount().isZero()).isTrue();
+        assertThat(limit.getAvailableCredit().getAmount()).isEqualTo(Money.ofARS(485_000));
     }
 
     private static class InMemoryCreditLimits implements CreditLimitRepository {

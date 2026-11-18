@@ -17,7 +17,6 @@ import java.time.YearMonth;
 public class MonthlyLimit implements Serializable {
 
     private static final long serialVersionUID = 1L;
-    private static final Money DEFAULT_MONTHLY_LIMIT = Money.ofARS(500_000); // $500k por mes
 
     private final Money amount;
     private final Money consumed;
@@ -34,14 +33,14 @@ public class MonthlyLimit implements Serializable {
      */
     public static MonthlyLimit of(Money amount) {
         validate(amount);
-        return new MonthlyLimit(amount, Money.zero(), YearMonth.now());
+        return new MonthlyLimit(amount, Money.zero(amount.getCurrencyCode()), YearMonth.now());
     }
 
     /**
-     * Crea un límite mensual por defecto
+     * Crea el límite mensual por defecto de la política de la moneda
      */
-    public static MonthlyLimit defaultLimit() {
-        return of(DEFAULT_MONTHLY_LIMIT);
+    public static MonthlyLimit defaultLimit(LimitPolicy policy) {
+        return of(policy.defaultMonthlyLimit());
     }
 
     /**
@@ -163,7 +162,7 @@ public class MonthlyLimit implements Serializable {
         validate(newAmount);
         // Mantiene el consumo actual si es del mismo mes
         if (needsReset()) {
-            return new MonthlyLimit(newAmount, Money.zero(), YearMonth.now());
+            return new MonthlyLimit(newAmount, Money.zero(newAmount.getCurrencyCode()), YearMonth.now());
         }
         return new MonthlyLimit(newAmount, this.consumed, this.resetMonth);
     }

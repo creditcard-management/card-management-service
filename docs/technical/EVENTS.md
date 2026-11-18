@@ -218,8 +218,8 @@ Los publica `card-limits` con su propio transactional outbox (`credit_limit_outb
 |---|---|---|---|
 | `CreditLimitAssignedEvent` | `credit-limit.assigned` | Asignación del límite (incluye los límites diario y mensual iniciales: no publican `updated`) | `cardId`, `creditLimitId`, `purchaseLimitAmount`, `cashAdvanceLimitAmount`, `dailyLimitAmount`, `monthlyLimitAmount`, `currency`, `assignedBy` |
 | `CreditLimitUpdatedEvent` | `credit-limit.updated` | Cada cambio de un límite: aumento o reducción del de compras, el de adelantos, el diario o el mensual (uno por límite) | `cardId`, `creditLimitId`, `limitType` (`PURCHASE`, `CASH_ADVANCE`, `DAILY`, `MONTHLY`), `previousAmount`, `newAmount`, `currency`, `reason`, `updatedBy` |
-| `CreditLimitConsumedEvent` | `credit-limit.consumed` | Sube lo consumido | `cardId`, `creditLimitId`, `operationId`, `operationType`, `amount`, `consumedAmount`, `availableAmount`, `currency` |
-| `CreditLimitReleasedEvent` | `credit-limit.released` | Baja lo consumido | Los mismos que `consumed` |
+| `CreditLimitConsumedEvent` | `credit-limit.consumed` | Sube la posición neta (consumido − saldo a favor): sube lo consumido o se usa saldo a favor | `cardId`, `creditLimitId`, `operationId`, `operationType`, `amount`, `consumedAmount`, `creditBalanceAmount`, `availableAmount`, `currency` |
+| `CreditLimitReleasedEvent` | `credit-limit.released` | Baja la posición neta: baja lo consumido o se acredita saldo a favor | Los mismos que `consumed` |
 
 **`operationType`** (de `consumed` / `released`):
 
@@ -233,8 +233,8 @@ Los publica `card-limits` con su propio transactional outbox (`credit_limit_outb
 | `operations/{id}/cancel` de una restauración | `consumed` | `REFUND_CANCELLED` | Ídem |
 | `operations/{id}/cancel` de una liberación | `consumed` | `PAYMENT_CANCELLED` | Ídem |
 
-- `amount` es lo que movió la operación. `consumedAmount` y `availableAmount` son los saldos después del cambio.
-- **No publican:** una operación repetida con el mismo `operationId` (ya publicó la primera vez), la cancelación de algo ya cancelado o que nunca llegó (`VOIDED`), y una restauración que no bajó nada (lo consumido ya estaba en cero; no hay saldo a favor). Tampoco las operaciones rechazadas: la transacción se revierte con su evento.
+- `amount` es lo que movió la operación en la posición neta. `consumedAmount`, `creditBalanceAmount` y `availableAmount` son los saldos después del cambio (`creditBalanceAmount` es mayor a cero solo si `consumedAmount` es cero; ver [LIMITS.md §3.5](LIMITS.md)).
+- **No publican:** una operación repetida con el mismo `operationId` (ya publicó la primera vez), y la cancelación de algo ya cancelado o que nunca llegó (`VOIDED`). Tampoco las operaciones rechazadas: la transacción se revierte con su evento.
 - Hoy no tienen consumidores.
 
 ---

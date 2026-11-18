@@ -1,5 +1,6 @@
 package com.unisono.card.limits.infrastructure.adapter.input.rest;
 
+import com.unisono.card.limits.domain.model.TestLimitPolicies;
 import com.unisono.card.limits.application.dto.request.AssignCreditLimitRequest;
 import com.unisono.card.limits.application.dto.request.ConsumeCreditRequest;
 import com.unisono.card.limits.application.dto.request.ReleaseCreditRequest;
@@ -501,7 +502,7 @@ class CreditLimitControllerTest {
     @Test
     @DisplayName("cancelOperation informa el resultado y el exceso sobre el límite")
     void cancelOperationReportsOutcomeAndOverLimit() {
-        CreditLimit real = CreditLimit.assign(CardId.of(CARD_ID), Money.ofARS(100_000), 0.3, "test");
+        CreditLimit real = CreditLimit.assign(CardId.of(CARD_ID), Money.ofARS(100_000), 0.3, TestLimitPolicies.ars(), "test");
         when(recalculateAvailableCreditUseCase.cancelOperation(any())).thenReturn(
                 new RecalculateAvailableCreditUseCase.CancelOperationResult(
                         RecalculateAvailableCreditUseCase.CancelOutcome.CANCELLED, real));

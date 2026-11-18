@@ -39,6 +39,7 @@ public class CreditLimitEntityMapper {
                 .cashAdvanceLimitAmount(creditLimit.getCashAdvanceLimit().getAmount().getAmount())
                 .cashAdvanceLimitCurrency(creditLimit.getCashAdvanceLimit().getAmount().getCurrencyCode())
                 .cashAdvanceConsumed(creditLimit.getCashAdvanceConsumed().getAmount().getAmount())
+                .creditBalance(creditLimit.getCreditBalance().getAmount().getAmount())
 
                 // Consumed credit - ⭐ Usar getCurrencyCode()
                 .consumedCreditAmount(creditLimit.getConsumedCredit().getAmount().getAmount())
@@ -79,12 +80,13 @@ public class CreditLimitEntityMapper {
             return null;
         }
 
-        // Reconstruir Value Objects usando helper method
-        PurchaseLimit purchaseLimit = PurchaseLimit.of(
+        // Reconstruir Value Objects usando helper method. Los límites no se validan contra la política
+        // vigente: un límite asignado con reglas anteriores tiene que seguir cargando
+        PurchaseLimit purchaseLimit = PurchaseLimit.reconstituteFromPersistence(
                 createMoney(entity.getPurchaseLimitAmount(), entity.getPurchaseLimitCurrency())
         );
 
-        CashAdvanceLimit cashAdvanceLimit = CashAdvanceLimit.of(
+        CashAdvanceLimit cashAdvanceLimit = CashAdvanceLimit.reconstituteFromPersistence(
                 createMoney(entity.getCashAdvanceLimitAmount(), entity.getCashAdvanceLimitCurrency())
         );
 
@@ -94,6 +96,10 @@ public class CreditLimitEntityMapper {
 
         ConsumedCredit cashAdvanceConsumed = ConsumedCredit.of(
                 createMoney(entity.getCashAdvanceConsumed(), entity.getCashAdvanceLimitCurrency())
+        );
+
+        CreditBalance creditBalance = CreditBalance.of(
+                createMoney(entity.getCreditBalance(), entity.getPurchaseLimitCurrency())
         );
 
         AvailableCredit availableCredit = AvailableCredit.of(
@@ -119,6 +125,7 @@ public class CreditLimitEntityMapper {
                 cashAdvanceLimit,
                 consumedCredit,
                 cashAdvanceConsumed,
+                creditBalance,
                 availableCredit,
                 dailyLimit,
                 monthlyLimit,
@@ -209,7 +216,7 @@ public class CreditLimitEntityMapper {
      */
     private Money createMoney(java.math.BigDecimal amount, String currency) {
         if (amount == null) {
-            return Money.zero();
+            return Money.zero(currency);
         }
 
         // Money.of() espera: Money.of(BigDecimal, String)

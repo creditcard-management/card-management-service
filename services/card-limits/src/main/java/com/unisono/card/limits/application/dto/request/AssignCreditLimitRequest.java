@@ -24,9 +24,9 @@ public class AssignCreditLimitRequest {
     private String cardId;
 
     @NotNull(message = "El límite de compras es obligatorio")
-    @DecimalMin(value = "1000.00", message = "El límite de compras debe ser al menos $1,000")
-    @DecimalMax(value = "10000000.00", message = "El límite de compras no puede exceder $10,000,000")
-    @Schema(description = "Límite de compras", example = "50000.00")
+    @DecimalMin(value = "0.01", message = "El límite de compras debe ser mayor a cero")
+    @Schema(description = "Límite de compras. El rango depende de la moneda (card.limits.policies; ARS: 2.500.000 a 25.000.000)",
+            example = "5000000.00")
     private BigDecimal purchaseLimitAmount;
 
     @NotBlank(message = "La moneda es obligatoria")
@@ -41,11 +41,11 @@ public class AssignCreditLimitRequest {
     private Double cashAdvancePercentage = 0.30; // 30% por defecto
 
     @DecimalMin(value = "0.01", message = "El límite diario debe ser mayor a cero")
-    @Schema(description = "Límite diario de transacciones (opcional)", example = "100000.00")
+    @Schema(description = "Límite diario de transacciones (opcional; por defecto el de la moneda, ARS 1.250.000)", example = "1250000.00")
     private BigDecimal dailyLimitAmount;
 
     @DecimalMin(value = "0.01", message = "El límite mensual debe ser mayor a cero")
-    @Schema(description = "Límite mensual de transacciones (opcional)", example = "500000.00")
+    @Schema(description = "Límite mensual de transacciones (opcional; por defecto el de la moneda, ARS 1.250.000)", example = "1250000.00")
     private BigDecimal monthlyLimitAmount;
 
     @NotBlank(message = "El usuario que asigna el límite es obligatorio")

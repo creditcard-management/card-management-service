@@ -28,8 +28,8 @@ public class AvailableCredit implements Serializable {
         return new AvailableCredit(amount);
     }
 
-    public static AvailableCredit zero() {
-        return of(Money.zero());
+    public static AvailableCredit zero(String currencyCode) {
+        return of(Money.zero(currencyCode));
     }
 
     /**
@@ -42,6 +42,16 @@ public class AvailableCredit implements Serializable {
 
         Money available = totalLimit.subtract(consumedCredit);
         return of(available);
+    }
+
+    /**
+     * Crédito disponible con saldo a favor: límite total − consumido + saldo a favor
+     */
+    public static AvailableCredit calculate(Money totalLimit, Money consumedCredit, Money creditBalance) {
+        if (creditBalance == null) {
+            throw new ValidationException("Los montos no pueden ser nulos");
+        }
+        return of(calculate(totalLimit, consumedCredit).getAmount().add(creditBalance));
     }
 
     private static void validate(Money amount) {

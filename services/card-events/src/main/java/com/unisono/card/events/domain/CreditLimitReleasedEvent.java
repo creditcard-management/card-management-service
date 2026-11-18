@@ -9,7 +9,8 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * Evento publicado cuando baja el crédito consumido de una tarjeta (credit-limit.released)
+ * Evento publicado cuando baja la posición neta de una tarjeta (consumido − saldo a favor):
+ * baja lo consumido o se acredita saldo a favor (credit-limit.released)
  */
 @Getter
 @ToString(callSuper = true)
@@ -25,6 +26,8 @@ public class CreditLimitReleasedEvent extends DomainEvent {
     private final BigDecimal amount;
     /** Crédito consumido total después del movimiento */
     private final BigDecimal consumedAmount;
+    /** Saldo a favor después del movimiento (mayor a cero solo si consumedAmount es cero) */
+    private final BigDecimal creditBalanceAmount;
     /** Crédito disponible después del movimiento */
     private final BigDecimal availableAmount;
     private final String currency;
@@ -39,6 +42,7 @@ public class CreditLimitReleasedEvent extends DomainEvent {
             @JsonProperty("operationType") String operationType,
             @JsonProperty("amount") BigDecimal amount,
             @JsonProperty("consumedAmount") BigDecimal consumedAmount,
+            @JsonProperty("creditBalanceAmount") BigDecimal creditBalanceAmount,
             @JsonProperty("availableAmount") BigDecimal availableAmount,
             @JsonProperty("currency") String currency
     ) {
@@ -49,6 +53,7 @@ public class CreditLimitReleasedEvent extends DomainEvent {
         this.operationType = operationType;
         this.amount = amount;
         this.consumedAmount = consumedAmount;
+        this.creditBalanceAmount = creditBalanceAmount;
         this.availableAmount = availableAmount;
         this.currency = currency;
     }
@@ -60,6 +65,7 @@ public class CreditLimitReleasedEvent extends DomainEvent {
             String operationType,
             BigDecimal amount,
             BigDecimal consumedAmount,
+            BigDecimal creditBalanceAmount,
             BigDecimal availableAmount,
             String currency
     ) {
@@ -70,6 +76,7 @@ public class CreditLimitReleasedEvent extends DomainEvent {
         this.operationType = operationType;
         this.amount = amount;
         this.consumedAmount = consumedAmount;
+        this.creditBalanceAmount = creditBalanceAmount;
         this.availableAmount = availableAmount;
         this.currency = currency;
     }

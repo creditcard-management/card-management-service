@@ -39,6 +39,7 @@ public class CreditOperationRepositoryAdapter implements CreditOperationReposito
                 .dailyDelta(operation.getDailyDelta().getAmount())
                 .monthlyDelta(operation.getMonthlyDelta().getAmount())
                 .cashAdvanceDelta(operation.getCashAdvanceDelta().getAmount())
+                .balanceDelta(operation.getBalanceDelta().getAmount())
                 .currency(operation.getCreditDelta().getCurrencyCode())
                 .appliedOn(operation.getAppliedOn())
                 .description(operation.getDescription())
@@ -58,6 +59,7 @@ public class CreditOperationRepositoryAdapter implements CreditOperationReposito
                 Money.of(entity.getDailyDelta(), currency),
                 Money.of(entity.getMonthlyDelta(), currency),
                 Money.of(entity.getCashAdvanceDelta(), currency),
+                Money.of(entity.getBalanceDelta(), currency),
                 entity.getAppliedOn(),
                 entity.getDescription(),
                 entity.getCreatedAt(),

@@ -24,7 +24,7 @@ class CashAdvanceCumulativeTest {
     @BeforeEach
     void setUp() {
         // Compras 100.000, adelantos 30.000 (30%), diario 100.000
-        limit = CreditLimit.assign(CARD_ID, Money.ofARS(100_000), 0.3, "test");
+        limit = CreditLimit.assign(CARD_ID, Money.ofARS(100_000), 0.3, TestLimitPolicies.ars(), "test");
     }
 
     private static Money ars(long amount) {
@@ -155,7 +155,7 @@ class CashAdvanceCumulativeTest {
     void theLimitCanBeLoweredBelowWhatWasUsedAndBlocksNewAdvances() {
         limit.consumeForCashAdvance(ars(20_000));
 
-        limit.updateCashAdvanceLimit(ars(10_000), "Riesgo", "analista");
+        limit.updateCashAdvanceLimit(ars(10_000), TestLimitPolicies.ars(), "Riesgo", "analista");
 
         assertThat(limit.getCashAdvanceConsumed().getAmount()).isEqualTo(ars(20_000));
         assertThat(limit.getCashAdvanceAvailable().isZero()).isTrue();
@@ -172,7 +172,7 @@ class CashAdvanceCumulativeTest {
     void advancesCanBeDisabledWhileInUse() {
         limit.consumeForCashAdvance(ars(20_000));
 
-        limit.updateCashAdvanceLimit(ars(0), "Riesgo", "analista");
+        limit.updateCashAdvanceLimit(ars(0), TestLimitPolicies.ars(), "Riesgo", "analista");
 
         assertThat(limit.getCashAdvanceLimit().isEnabled()).isFalse();
         assertThat(limit.getCashAdvanceConsumed().getAmount()).isEqualTo(ars(20_000));

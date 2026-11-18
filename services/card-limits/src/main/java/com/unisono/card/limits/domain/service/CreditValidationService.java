@@ -92,22 +92,16 @@ public class CreditValidationService implements ValidatePurchaseUseCase {
             if (!creditLimit.getCashAdvanceLimit().isEnabled()) {
                 return CreditLimit.NO_CASH_ADVANCE;
             }
-            if (requestedAmount.isGreaterThan(creditLimit.getCashAdvanceAvailable())) {
+            // Solo cuenta contra el tope la parte que no cubre el saldo a favor
+            if (creditLimit.debtPartOf(requestedAmount).isGreaterThan(creditLimit.getCashAdvanceAvailable())) {
                 return String.format(
                         "Se excede el límite de adelantos. Disponible para adelantos: %s (tope %s)",
                         creditLimit.getCashAdvanceAvailable(), creditLimit.getCashAdvanceLimit().getAmount()
                 );
             }
-        } else {
-            if (!creditLimit.getPurchaseLimit().allows(requestedAmount)) {
-                return String.format(
-                        "Se excede el límite de compras de %s",
-                        creditLimit.getPurchaseLimit().getAmount()
-                );
-            }
         }
 
-        // Verificar crédito disponible
+        // Verificar crédito disponible (límite de compras − consumido + saldo a favor)
         if (!creditLimit.getAvailableCredit().isSufficientFor(requestedAmount)) {
             return String.format(
                     "Crédito insuficiente. Disponible: %s",

@@ -1,5 +1,8 @@
 package com.unisono.card.limits.infrastructure.adapter.output.persistence;
 
+import com.unisono.card.limits.domain.port.output.LimitPolicyPort;
+import org.springframework.context.annotation.Bean;
+import com.unisono.card.limits.domain.model.TestLimitPolicies;
 import com.unisono.card.limits.domain.model.CreditLimit;
 import com.unisono.card.limits.domain.port.input.RecalculateAvailableCreditUseCase.ConsumeCreditCommand;
 import com.unisono.card.limits.domain.port.input.UpdateCreditLimitUseCase.IncreasePurchaseLimitCommand;
@@ -81,6 +84,10 @@ class CreditLimitConcurrencyTest {
     @Import({CreditLimitRepositoryAdapter.class, CreditOperationRepositoryAdapter.class, CreditLimitEntityMapper.class,
             CreditLimitOutboxEventAdapter.class, CreditLimitEventEmitter.class, CreditLimitManagementService.class})
     static class Config {
+        @Bean
+        LimitPolicyPort limitPolicyPort() {
+            return TestLimitPolicies.port();
+        }
     }
 
     @DynamicPropertySource
@@ -213,7 +220,7 @@ class CreditLimitConcurrencyTest {
     /** Asigna un límite y guarda su historial, como el caso de uso de asignación */
     private String assign(long purchaseLimit) {
         CreditLimit limit = CreditLimit.assign(CardId.of(UUID.randomUUID().toString()), Money.ofARS(purchaseLimit),
-                0.3, "test");
+                0.3, TestLimitPolicies.ars(), "test");
         return new TransactionTemplate(transactionManager).execute(s -> {
             creditLimits.save(limit);
             limit.getHistory().forEach(creditLimits::saveHistory);

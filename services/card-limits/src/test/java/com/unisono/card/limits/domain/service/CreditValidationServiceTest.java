@@ -1,5 +1,6 @@
 package com.unisono.card.limits.domain.service;
 
+import com.unisono.card.limits.domain.model.TestLimitPolicies;
 import com.unisono.card.limits.domain.model.CreditLimit;
 import com.unisono.card.limits.domain.port.input.ValidatePurchaseUseCase.ValidateCashAdvanceCommand;
 import com.unisono.card.limits.domain.port.input.ValidatePurchaseUseCase.ValidatePurchaseCommand;
@@ -39,7 +40,7 @@ class CreditValidationServiceTest {
     void setUp() {
         service = new CreditValidationService(creditLimitRepository, cardValidationPort);
         when(creditLimitRepository.findByCardId(CARD_ID))
-                .thenReturn(Optional.of(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test")));
+                .thenReturn(Optional.of(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test")));
     }
 
     @Test
@@ -56,7 +57,7 @@ class CreditValidationServiceTest {
     void cashAdvanceOnACardWithoutAdvancesIsRejectedWithItsReason() {
         when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(true);
         when(creditLimitRepository.findByCardId(CARD_ID))
-                .thenReturn(Optional.of(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0, "test")));
+                .thenReturn(Optional.of(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0, TestLimitPolicies.ars(), "test")));
 
         ValidationResult advance = service.validateCashAdvance(new ValidateCashAdvanceCommand(CARD_ID, Money.ofARS(1_000)));
 
@@ -67,7 +68,7 @@ class CreditValidationServiceTest {
     @Test
     void cashAdvanceAboveWhatIsLeftForAdvancesIsRejectedWithItsReason() {
         when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(true);
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(100_000), 0.3, "test"); // tope 30.000
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(100_000), 0.3, TestLimitPolicies.ars(), "test"); // tope 30.000
         limit.consumeForCashAdvance(Money.ofARS(20_000));
         when(creditLimitRepository.findByCardId(CARD_ID)).thenReturn(Optional.of(limit));
 
