@@ -543,10 +543,3 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 | `card-lifecycle` | Lee `credit_limits` por `card_id` para decidir si se puede activar | La regla existe pero el endpoint de activación no la usa ([LIFECYCLE.md §9](LIFECYCLE.md)); además esa consulta no filtra `deleted` |
 | `payment-processing` | Valida (`validate/*`), consume al aprobar (`consume-*`) y restaura en reversos y devoluciones (`restore-credit`) por REST, siempre con `operationId`. Cancela las operaciones cuyo pago no confirmó (`operations/{id}/cancel`) | Funciona ([PAYMENT.md §4.7 y §7](PAYMENT.md)) |
 | `card-events` | Contratos `credit-limit.*` y `KafkaTopics` ([EVENTS.md §4.10](EVENTS.md)) | Se publican por el outbox (§6.5); todavía sin consumidores |
-
----
-
-## 9. Limitaciones conocidas y deuda técnica
-
-No hay deuda técnica conocida propia del módulo. Las limitaciones de la retención de fondos (lo retenido figura como consumido y no hay captura parcial) están en [PAYMENT.md §10](PAYMENT.md), porque la preautorización vive en payment-processing (§5.2).
-  

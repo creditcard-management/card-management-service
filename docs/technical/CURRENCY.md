@@ -99,7 +99,7 @@ Moneda que el sistema acepta para operar.
 
 Solo se aceptan monedas de 2 decimales porque `Money` redondea todo a 2 (§3.3): una moneda sin decimales o con 3 quedaría mal representada. `restore` no aplica la regla, así una moneda cargada a mano en la base se sigue pudiendo leer.
 
-La **moneda del sistema** se configura con `card.currency.system-currency` (por defecto `ARS`): es la de los límites de crédito, por eso no se puede desactivar. **Al arrancar**, `SystemCurrencyCheck` llama a `CurrencyCatalogService.verifySystemCurrency()`: si la moneda no está en el catálogo o está inactiva (solo puede pasar por un cambio directo en la base), la aplicación no arranca, con un mensaje que dice qué falta. Mejor eso que rechazar con 422 cada pago en otra moneda. Que coincida con la moneda de card-limits (ARS, fija en sus value objects) no se puede verificar desde acá (§9).
+La **moneda del sistema** se configura con `card.currency.system-currency` (por defecto `ARS`): es la de los límites de crédito, por eso no se puede desactivar. **Al arrancar**, `SystemCurrencyCheck` llama a `CurrencyCatalogService.verifySystemCurrency()`: si la moneda no está en el catálogo o está inactiva (solo puede pasar por un cambio directo en la base), la aplicación no arranca, con un mensaje que dice qué falta. Mejor eso que rechazar con 422 cada pago en otra moneda. Que card-limits tenga política para esa moneda (`card.limits.policies`, [LIMITS.md §3.2.1](LIMITS.md)) no se puede verificar desde acá (§9).
 
 ### 3.2 `ExchangeRate`
 
