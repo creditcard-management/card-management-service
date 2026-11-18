@@ -52,6 +52,10 @@ public class CreditLimitEntity {
     @Column(name = "cash_advance_consumed", nullable = false, precision = 15, scale = 2)
     private BigDecimal cashAdvanceConsumed;
 
+    /** Saldo a favor (en la moneda del límite de compras); mayor a cero solo si consumed_credit_amount es cero */
+    @Column(name = "credit_balance", nullable = false, precision = 15, scale = 2)
+    private BigDecimal creditBalance;
+
     // ========================================
     // Crédito actual
     // ========================================

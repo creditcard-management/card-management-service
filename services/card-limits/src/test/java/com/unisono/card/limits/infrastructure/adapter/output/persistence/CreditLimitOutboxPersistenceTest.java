@@ -1,5 +1,8 @@
 package com.unisono.card.limits.infrastructure.adapter.output.persistence;
 
+import com.unisono.card.limits.domain.port.output.LimitPolicyPort;
+import org.springframework.context.annotation.Bean;
+import com.unisono.card.limits.domain.model.TestLimitPolicies;
 import com.unisono.card.events.config.EventSerializationConfig;
 import com.unisono.card.events.config.KafkaTopics;
 import com.unisono.card.events.domain.CreditLimitConsumedEvent;
@@ -76,6 +79,10 @@ class CreditLimitOutboxPersistenceTest {
     @Import({CreditLimitRepositoryAdapter.class, CreditOperationRepositoryAdapter.class, CreditLimitEntityMapper.class,
             CreditLimitOutboxEventAdapter.class, CreditLimitEventEmitter.class, CreditLimitManagementService.class})
     static class Config {
+        @Bean
+        LimitPolicyPort limitPolicyPort() {
+            return TestLimitPolicies.port();
+        }
     }
 
     @DynamicPropertySource
@@ -113,7 +120,7 @@ class CreditLimitOutboxPersistenceTest {
         when(cardValidationPort.isCardActive(any())).thenReturn(true);
         cardId = CardId.of(UUID.randomUUID().toString());
         creditLimitId = new TransactionTemplate(transactionManager).execute(s ->
-                creditLimits.save(CreditLimit.assign(cardId, Money.ofARS(500_000), 0.3, "test")).getId());
+                creditLimits.save(CreditLimit.assign(cardId, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test")).getId());
     }
 
     @Test
@@ -173,7 +180,7 @@ class CreditLimitOutboxPersistenceTest {
     @Test
     void eventsCannotBeEnqueuedOutsideATransaction() {
         assertThatThrownBy(() -> eventOutbox.enqueue(KafkaTopics.CREDIT_LIMIT_CONSUMED, cardId.getValue(),
-                new CreditLimitConsumedEvent(cardId.getValue(), creditLimitId, null, "PURCHASE", null, null, null, "ARS")))
+                new CreditLimitConsumedEvent(cardId.getValue(), creditLimitId, null, "PURCHASE", null, null, null, null, "ARS")))
                 .isInstanceOf(IllegalTransactionStateException.class);
     }
 }

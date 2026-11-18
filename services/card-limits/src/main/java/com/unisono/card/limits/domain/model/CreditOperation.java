@@ -12,8 +12,8 @@ import java.util.Objects;
  * Operación de crédito identificada por el cliente (operationId).
  * <p>
  * Hace idempotentes los consumos y restauraciones: una operación ya aplicada no se vuelve a aplicar.
- * Guarda cuánto movió en lo consumido, en el cupo diario y en el mensual (positivo = consumió,
- * negativo = devolvió) para poder deshacerla exactamente con {@link CreditLimit#revertOperation}.
+ * Guarda cuánto movió en lo consumido, en el saldo a favor, en el cupo diario y en el mensual (positivo = subió,
+ * negativo = bajó) para poder deshacerla exactamente con {@link CreditLimit#revertOperation}.
  * <p>
  * Estados:
  * <ul>
@@ -58,6 +58,8 @@ public class CreditOperation {
     private final Money monthlyDelta;
     /** Lo que movió en lo usado en adelantos (positivo = consumió adelanto, negativo = lo devolvió) */
     private final Money cashAdvanceDelta;
+    /** Lo que movió en el saldo a favor (positivo = lo acreditó, negativo = lo usó) */
+    private final Money balanceDelta;
     private final LocalDate appliedOn;
     private final String description;
     private final LocalDateTime createdAt;
@@ -65,7 +67,7 @@ public class CreditOperation {
 
     private CreditOperation(String operationId, String creditLimitId, Type type, Status status,
                             Money creditDelta, Money dailyDelta, Money monthlyDelta, Money cashAdvanceDelta,
-                            LocalDate appliedOn, String description, LocalDateTime createdAt,
+                            Money balanceDelta, LocalDate appliedOn, String description, LocalDateTime createdAt,
                             LocalDateTime cancelledAt) {
         this.operationId = Objects.requireNonNull(operationId, "operationId");
         this.creditLimitId = Objects.requireNonNull(creditLimitId, "creditLimitId");
@@ -75,6 +77,7 @@ public class CreditOperation {
         this.dailyDelta = Objects.requireNonNull(dailyDelta, "dailyDelta");
         this.monthlyDelta = Objects.requireNonNull(monthlyDelta, "monthlyDelta");
         this.cashAdvanceDelta = Objects.requireNonNull(cashAdvanceDelta, "cashAdvanceDelta");
+        this.balanceDelta = Objects.requireNonNull(balanceDelta, "balanceDelta");
         this.appliedOn = Objects.requireNonNull(appliedOn, "appliedOn");
         this.description = description;
         this.createdAt = createdAt;
@@ -92,6 +95,7 @@ public class CreditOperation {
                 after.daily().subtract(before.daily()),
                 after.monthly().subtract(before.monthly()),
                 after.cashAdvance().subtract(before.cashAdvance()),
+                after.balance().subtract(before.balance()),
                 LocalDate.now(), description, LocalDateTime.now(), null);
     }
 
@@ -102,15 +106,16 @@ public class CreditOperation {
         Money zero = Money.zero(currency);
         LocalDateTime now = LocalDateTime.now();
         return new CreditOperation(operationId, creditLimitId, null, Status.VOIDED,
-                zero, zero, zero, zero, now.toLocalDate(), null, now, now);
+                zero, zero, zero, zero, zero, now.toLocalDate(), null, now, now);
     }
 
     public static CreditOperation reconstitute(String operationId, String creditLimitId, Type type, Status status,
                                                Money creditDelta, Money dailyDelta, Money monthlyDelta,
-                                               Money cashAdvanceDelta, LocalDate appliedOn, String description,
-                                               LocalDateTime createdAt, LocalDateTime cancelledAt) {
+                                               Money cashAdvanceDelta, Money balanceDelta, LocalDate appliedOn,
+                                               String description, LocalDateTime createdAt,
+                                               LocalDateTime cancelledAt) {
         return new CreditOperation(operationId, creditLimitId, type, status, creditDelta, dailyDelta, monthlyDelta,
-                cashAdvanceDelta, appliedOn, description, createdAt, cancelledAt);
+                cashAdvanceDelta, balanceDelta, appliedOn, description, createdAt, cancelledAt);
     }
 
     public boolean isApplied() {

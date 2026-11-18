@@ -22,7 +22,7 @@ class CreditLimitRestoreTest {
 
     @BeforeEach
     void setUp() {
-        creditLimit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test");
+        creditLimit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test");
         creditLimit.consumeForPurchase(Money.ofARS(20_000));
     }
 
@@ -68,14 +68,15 @@ class CreditLimitRestoreTest {
     }
 
     @Test
-    void shouldCapConsumedAtZeroAndReportTheExcessWhenAlreadyPaid() {
+    void shouldCreditTheExcessAsBalanceWhenAlreadyPaid() {
         creditLimit.releaseCredit(Money.ofARS(15_000)); // pago del resumen: consumido = 5.000
 
-        Money notRestored = creditLimit.restoreConsumption(Money.ofARS(20_000), LocalDate.now());
+        Money credited = creditLimit.restoreConsumption(Money.ofARS(20_000), LocalDate.now());
 
-        assertThat(notRestored).isEqualTo(Money.ofARS(15_000));
+        assertThat(credited).isEqualTo(Money.ofARS(15_000));
         assertThat(creditLimit.getConsumedCredit().getAmount().isZero()).isTrue();
-        assertThat(creditLimit.getAvailableCredit().getAmount()).isEqualTo(Money.ofARS(500_000));
+        assertThat(creditLimit.getCreditBalance().getAmount()).isEqualTo(Money.ofARS(15_000));
+        assertThat(creditLimit.getAvailableCredit().getAmount()).isEqualTo(Money.ofARS(515_000));
         assertThat(creditLimit.getDailyLimit().getConsumed().isZero()).isTrue();
     }
 
@@ -94,7 +95,7 @@ class CreditLimitRestoreTest {
         LocalDate yesterday = LocalDate.now().minusDays(1);
         CreditOperation fromYesterday = CreditOperation.reconstitute("op", creditLimit.getId(),
                 CreditOperation.Type.CONSUME_PURCHASE, CreditOperation.Status.APPLIED, applied.getCreditDelta(),
-                applied.getDailyDelta(), applied.getMonthlyDelta(), applied.getCashAdvanceDelta(), yesterday, "compra",
+                applied.getDailyDelta(), applied.getMonthlyDelta(), applied.getCashAdvanceDelta(), applied.getBalanceDelta(), yesterday, "compra",
                 null, null);
 
         creditLimit.revertOperation(fromYesterday);

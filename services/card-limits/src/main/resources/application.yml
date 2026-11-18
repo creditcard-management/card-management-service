@@ -37,6 +37,16 @@ card:
       send-timeout-ms: 15000     # Espera por evento; debe superar delivery.timeout.ms + max.block.ms del productor
       retention-days: 7          # Días que se conservan los eventos publicados
       cleanup-cron: "0 0 3 * * *" # Limpieza diaria (los eventos fallidos no se borran)
+    # Rangos y valores por defecto de los límites por moneda (LimitPolicy). Solo se pueden asignar límites
+    # en las monedas listadas. Los rangos se aplican al asignar o modificar, no a los límites ya guardados.
+    policies:
+      ARS:
+        min-purchase-limit: 2500000
+        max-purchase-limit: 25000000
+        min-cash-advance-limit: 500         # El tope de adelantos también puede ser 0 (sin adelantos)
+        max-cash-advance-limit: 7500000     # 30% del máximo de compras
+        default-daily-limit: 1250000
+        default-monthly-limit: 1250000
 
 server:
   port: 8082  # ✅ Puerto diferente

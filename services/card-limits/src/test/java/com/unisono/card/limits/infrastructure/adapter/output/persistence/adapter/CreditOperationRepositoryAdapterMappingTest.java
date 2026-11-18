@@ -21,13 +21,14 @@ class CreditOperationRepositoryAdapterMappingTest {
         LocalDateTime createdAt = LocalDateTime.of(2026, 11, 14, 10, 0);
         CreditOperation original = CreditOperation.reconstitute("pay-1", "cl-1", CreditOperation.Type.RELEASE,
                 CreditOperation.Status.APPLIED, ars("-25000.00"), ars("-1.11"), ars("-2.22"), ars("-20000.00"),
-                LocalDate.of(2026, 11, 14), "pago", createdAt, null);
+                ars("3333.33"), LocalDate.of(2026, 11, 14), "pago", createdAt, null);
 
         CreditOperationEntity entity = CreditOperationRepositoryAdapter.toEntity(original);
 
         assertThat(entity.getOperationType()).isEqualTo(CreditOperation.Type.RELEASE);
         assertThat(entity.getCreditDelta()).isEqualByComparingTo("-25000.00");
         assertThat(entity.getDailyDelta()).isEqualByComparingTo("-1.11");
+        assertThat(entity.getBalanceDelta()).isEqualByComparingTo("3333.33");
         assertThat(entity.getMonthlyDelta()).isEqualByComparingTo("-2.22");
         assertThat(entity.getCashAdvanceDelta()).isEqualByComparingTo("-20000.00");
         assertThat(entity.getCurrency()).isEqualTo("ARS");

@@ -1,5 +1,6 @@
 package com.unisono.card.limits.domain.service;
 
+import com.unisono.card.limits.domain.model.TestLimitPolicies;
 import com.unisono.card.events.config.KafkaTopics;
 import com.unisono.card.events.domain.CreditLimitAssignedEvent;
 import com.unisono.card.events.domain.CreditLimitUpdatedEvent;
@@ -58,7 +59,8 @@ class CreditLimitChangeEventsTest {
     @BeforeEach
     void setUp() {
         service = new CreditLimitManagementService(creditLimitRepository, cardValidationPort, creditOperationRepository,
-                new CreditLimitEventEmitter((topic, key, event) -> outbox.add(Map.entry(topic, event))));
+                new CreditLimitEventEmitter((topic, key, event) -> outbox.add(Map.entry(topic, event))),
+                TestLimitPolicies.port());
         lenient().when(creditLimitRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(creditLimitRepository.saveHistory(any())).thenAnswer(inv -> inv.getArgument(0));
     }
@@ -203,7 +205,7 @@ class CreditLimitChangeEventsTest {
     }
 
     private CreditLimit existing() {
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test");
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test");
         // Las entradas del historial de la asignación ya están guardadas
         limit.getHistory().forEach(h -> org.springframework.test.util.ReflectionTestUtils.setField(h, "id", 1L));
         when(creditLimitRepository.findByIdForUpdate(limit.getId())).thenReturn(Optional.of(limit));

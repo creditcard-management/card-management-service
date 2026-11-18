@@ -22,7 +22,7 @@ class CreditLimitInvariantsTest {
     @BeforeEach
     void setUp() {
         // Compras 500.000, adelantos 150.000 (30%), diario 100.000, mensual 500.000
-        creditLimit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test");
+        creditLimit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test");
         creditLimit.consumeForPurchase(Money.ofARS(20_000));
     }
 
@@ -37,12 +37,12 @@ class CreditLimitInvariantsTest {
     }
 
     @Test
-    void releaseAboveTheConsumedCreditIsABusinessRuleViolation() {
-        assertThatThrownBy(() -> creditLimit.releaseCredit(Money.ofARS(new java.math.BigDecimal("20000.01"))))
-                .isInstanceOf(BusinessRuleException.class)
-                .hasMessageContaining("supera el crédito consumido");
+    void releaseAboveTheConsumedCreditCreditsTheExcessAsBalance() {
+        Money credited = creditLimit.releaseCredit(Money.ofARS(new java.math.BigDecimal("20000.01")));
 
-        assertThat(creditLimit.getConsumedCredit().getAmount()).isEqualTo(Money.ofARS(20_000));
+        assertThat(credited).isEqualTo(Money.ofARS(new java.math.BigDecimal("0.01")));
+        assertThat(creditLimit.getConsumedCredit().getAmount().isZero()).isTrue();
+        assertThat(creditLimit.getCreditBalance().getAmount()).isEqualTo(Money.ofARS(new java.math.BigDecimal("0.01")));
     }
 
     @Test
@@ -61,7 +61,7 @@ class CreditLimitInvariantsTest {
 
     @Test
     void decreaseBelowTheCashAdvanceLimitIsRejectedWithoutChangingTheLimit() {
-        assertThatThrownBy(() -> creditLimit.decreasePurchaseLimit(Money.ofARS(400_000), "Riesgo", "analista"))
+        assertThatThrownBy(() -> creditLimit.decreasePurchaseLimit(Money.ofARS(400_000), TestLimitPolicies.ars(), "Riesgo", "analista"))
                 .isInstanceOf(BusinessRuleException.class)
                 .hasMessageContaining("límite de adelantos");
 
@@ -71,17 +71,17 @@ class CreditLimitInvariantsTest {
 
     @Test
     void decreaseDownToTheCashAdvanceLimitIsAllowed() {
-        creditLimit.decreasePurchaseLimit(Money.ofARS(350_000), "Riesgo", "analista");
+        creditLimit.decreasePurchaseLimit(Money.ofARS(350_000), TestLimitPolicies.ars(), "Riesgo", "analista");
 
         assertThat(creditLimit.getPurchaseLimit().getAmount()).isEqualTo(Money.ofARS(150_000));
     }
 
     @Test
     void decreaseBelowTheConsumedCreditIsRejectedWithoutChangingTheLimit() {
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.01, "test"); // adelantos 5.000
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.01, TestLimitPolicies.ars(), "test"); // adelantos 5.000
         limit.consumeForPurchase(Money.ofARS(90_000));
 
-        assertThatThrownBy(() -> limit.decreasePurchaseLimit(Money.ofARS(420_000), "Riesgo", "analista"))
+        assertThatThrownBy(() -> limit.decreasePurchaseLimit(Money.ofARS(420_000), TestLimitPolicies.ars(), "Riesgo", "analista"))
                 .isInstanceOf(BusinessRuleException.class)
                 .hasMessageContaining("crédito consumido");
         assertThat(limit.getPurchaseLimit().getAmount()).isEqualTo(Money.ofARS(500_000));

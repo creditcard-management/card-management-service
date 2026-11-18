@@ -25,8 +25,12 @@ import java.util.Objects;
  * Invariantes:
  * - El límite de adelantos no puede exceder el límite de compras
  * - El crédito consumido no puede exceder el límite total
- * - El crédito disponible = límite total - crédito consumido
+ * - Lo consumido y el saldo a favor nunca son mayores a cero a la vez
+ * - El crédito disponible = límite total - crédito consumido + saldo a favor
  * - Los límites diarios/mensuales se auto-resetean
+ *
+ * Todo movimiento cambia la posición neta (consumido − saldo a favor): un consumo la sube, un pago o una
+ * devolución la bajan. Si queda positiva es deuda (consumido); si queda negativa, saldo a favor.
  */
 @Getter
 @Builder(access = AccessLevel.PRIVATE)
@@ -46,6 +50,8 @@ public class CreditLimit {
     private ConsumedCredit consumedCredit;
     /** Parte de lo consumido que corresponde a adelantos en efectivo (≤ consumedCredit) */
     private ConsumedCredit cashAdvanceConsumed;
+    /** Saldo a favor: mayor a cero solo si lo consumido es cero */
+    private CreditBalance creditBalance;
     private AvailableCredit availableCredit;
 
     // Límites temporales
@@ -62,20 +68,24 @@ public class CreditLimit {
     // ========================================
 
     /**
-     * Asigna un nuevo límite de crédito a una tarjeta
+     * Asigna un nuevo límite de crédito a una tarjeta, con los rangos y los límites diario y mensual por
+     * defecto de la política de su moneda
      */
     public static CreditLimit assign(
             CardId cardId,
             Money purchaseLimitAmount,
             double cashAdvancePercentage,
+            LimitPolicy policy,
             String assignedBy
     ) {
-        validateAssignment(cardId, purchaseLimitAmount, cashAdvancePercentage);
+        validateAssignment(cardId, purchaseLimitAmount, cashAdvancePercentage, policy);
 
-        PurchaseLimit purchaseLimit = PurchaseLimit.of(purchaseLimitAmount);
+        String currency = purchaseLimitAmount.getCurrencyCode();
+        PurchaseLimit purchaseLimit = PurchaseLimit.of(purchaseLimitAmount, policy);
         CashAdvanceLimit cashAdvanceLimit = CashAdvanceLimit.fromPurchaseLimit(
                 purchaseLimit,
-                cashAdvancePercentage
+                cashAdvancePercentage,
+                policy
         );
 
         LocalDateTime now = LocalDateTime.now();
@@ -96,11 +106,12 @@ public class CreditLimit {
                 .cardId(cardId)
                 .purchaseLimit(purchaseLimit)
                 .cashAdvanceLimit(cashAdvanceLimit)
-                .consumedCredit(ConsumedCredit.zero())
-                .cashAdvanceConsumed(ConsumedCredit.zero())
+                .consumedCredit(ConsumedCredit.zero(currency))
+                .cashAdvanceConsumed(ConsumedCredit.zero(currency))
+                .creditBalance(CreditBalance.zero(currency))
                 .availableCredit(AvailableCredit.of(purchaseLimitAmount))
-                .dailyLimit(DailyLimit.defaultLimit())
-                .monthlyLimit(MonthlyLimit.defaultLimit())
+                .dailyLimit(DailyLimit.defaultLimit(policy))
+                .monthlyLimit(MonthlyLimit.defaultLimit(policy))
                 .history(initialHistory)
                 .createdAt(now)
                 .updatedAt(now)
@@ -117,6 +128,7 @@ public class CreditLimit {
             CashAdvanceLimit cashAdvanceLimit,
             ConsumedCredit consumedCredit,
             ConsumedCredit cashAdvanceConsumed,
+            CreditBalance creditBalance,
             AvailableCredit availableCredit,
             DailyLimit dailyLimit,
             MonthlyLimit monthlyLimit,
@@ -130,6 +142,7 @@ public class CreditLimit {
                 .cashAdvanceLimit(cashAdvanceLimit)
                 .consumedCredit(consumedCredit)
                 .cashAdvanceConsumed(cashAdvanceConsumed)
+                .creditBalance(creditBalance)
                 .availableCredit(availableCredit)
                 .dailyLimit(dailyLimit)
                 .monthlyLimit(monthlyLimit)
@@ -143,13 +156,13 @@ public class CreditLimit {
     // ========================================
 
     /**
-     * Aumenta el límite de compras
+     * Aumenta el límite de compras (el nuevo total debe quedar dentro del rango de la política)
      */
-    public void increasePurchaseLimit(Money additionalAmount, String reason, String changedBy) {
+    public void increasePurchaseLimit(Money additionalAmount, LimitPolicy policy, String reason, String changedBy) {
         validateChangeAmount(additionalAmount);
         Money previousLimit = this.purchaseLimit.getAmount();
 
-        this.purchaseLimit = this.purchaseLimit.increase(additionalAmount);
+        this.purchaseLimit = this.purchaseLimit.increase(additionalAmount, policy);
 
         // ⭐ Registrar en historial
         this.history.add(CreditLimitHistory.recordIncrease(
@@ -166,13 +179,13 @@ public class CreditLimit {
     }
 
     /**
-     * Disminuye el límite de compras
+     * Disminuye el límite de compras (el nuevo total debe quedar dentro del rango de la política)
      */
-    public void decreasePurchaseLimit(Money reductionAmount, String reason, String changedBy) {
+    public void decreasePurchaseLimit(Money reductionAmount, LimitPolicy policy, String reason, String changedBy) {
         validateChangeAmount(reductionAmount);
         Money previousLimit = this.purchaseLimit.getAmount();
 
-        PurchaseLimit newLimit = this.purchaseLimit.decrease(reductionAmount);
+        PurchaseLimit newLimit = this.purchaseLimit.decrease(reductionAmount, policy);
 
         // Validar que el nuevo límite no sea menor al crédito consumido
         if (newLimit.getAmount().isLessThan(this.consumedCredit.getAmount())) {
@@ -206,9 +219,9 @@ public class CreditLimit {
     }
 
     /**
-     * Actualiza el límite de adelantos
+     * Actualiza el límite de adelantos (dentro del rango de la política, o cero para deshabilitarlos)
      */
-    public void updateCashAdvanceLimit(Money newAmount, String reason, String changedBy) {
+    public void updateCashAdvanceLimit(Money newAmount, LimitPolicy policy, String reason, String changedBy) {
         Money previousLimit = this.cashAdvanceLimit.getAmount();
 
         // Validar que no exceda el límite de compras
@@ -218,7 +231,7 @@ public class CreditLimit {
             );
         }
 
-        this.cashAdvanceLimit = CashAdvanceLimit.of(newAmount);
+        this.cashAdvanceLimit = CashAdvanceLimit.of(newAmount, policy);
 
         // ⭐ Registrar en historial
         this.history.add(CreditLimitHistory.recordUpdate(
@@ -291,20 +304,12 @@ public class CreditLimit {
     // ========================================
 
     /**
-     * Consume crédito para una compra
+     * Consume crédito para una compra. Usa primero el saldo a favor y el resto pasa a lo consumido.
      */
     public void consumeForPurchase(Money purchaseAmount) {
         validatePurchaseAmount(purchaseAmount);
 
-        // Validar límite de compras
-        if (!this.purchaseLimit.allows(purchaseAmount)) {
-            throw new BusinessRuleException(
-                    String.format("La compra de %s excede el límite de compras de %s",
-                            purchaseAmount, this.purchaseLimit.getAmount())
-            );
-        }
-
-        // Validar crédito disponible
+        // Validar crédito disponible (límite de compras − consumido + saldo a favor)
         if (!this.availableCredit.isSufficientFor(purchaseAmount)) {
             throw new BusinessRuleException(
                     String.format("Crédito insuficiente. Disponible: %s, Solicitado: %s",
@@ -315,8 +320,8 @@ public class CreditLimit {
         // Validar límites temporales
         validateTemporalLimits(purchaseAmount);
 
-        // Consumir crédito
-        this.consumedCredit = this.consumedCredit.consume(purchaseAmount);
+        // Consumir crédito: primero el saldo a favor; los límites diario y mensual cuentan el monto completo
+        moveNetDebt(purchaseAmount);
         this.dailyLimit = this.dailyLimit.consume(purchaseAmount);
         this.monthlyLimit = this.monthlyLimit.consume(purchaseAmount);
 
@@ -325,7 +330,8 @@ public class CreditLimit {
     }
 
     /**
-     * Consume crédito para un adelanto en efectivo
+     * Consume crédito para un adelanto en efectivo. Como una compra, usa primero el saldo a favor; solo la parte
+     * que pasa a deuda cuenta contra el tope de adelantos.
      */
     public void consumeForCashAdvance(Money advanceAmount) {
         validatePurchaseAmount(advanceAmount);
@@ -334,12 +340,15 @@ public class CreditLimit {
             throw new BusinessRuleException(NO_CASH_ADVANCE);
         }
 
-        // Validar límite de adelantos: es acumulativo (lo ya usado en adelantos descuenta del tope)
-        if (advanceAmount.isGreaterThan(getCashAdvanceAvailable())) {
+        // Validar límite de adelantos: es acumulativo (lo ya usado en adelantos descuenta del tope) y cuenta solo
+        // la parte que no cubre el saldo a favor
+        Money advanceDebt = debtPartOf(advanceAmount);
+        if (advanceDebt.isGreaterThan(getCashAdvanceAvailable())) {
             throw new BusinessRuleException(
-                    String.format("El adelanto de %s excede el disponible para adelantos de %s (tope %s, usado %s)",
+                    String.format("El adelanto de %s excede el disponible para adelantos de %s (tope %s, usado %s%s)",
                             advanceAmount, getCashAdvanceAvailable(), this.cashAdvanceLimit.getAmount(),
-                            this.cashAdvanceConsumed.getAmount())
+                            this.cashAdvanceConsumed.getAmount(),
+                            this.creditBalance.isPositive() ? ", saldo a favor " + this.creditBalance.getAmount() : "")
             );
         }
 
@@ -354,9 +363,9 @@ public class CreditLimit {
         // Validar límites temporales
         validateTemporalLimits(advanceAmount);
 
-        // Consumir crédito
-        this.consumedCredit = this.consumedCredit.consume(advanceAmount);
-        this.cashAdvanceConsumed = this.cashAdvanceConsumed.consume(advanceAmount);
+        // Consumir crédito: lo que pasa a deuda es lo usado en adelantos
+        Money newDebt = moveNetDebt(advanceAmount);
+        this.cashAdvanceConsumed = this.cashAdvanceConsumed.consume(newDebt);
         this.dailyLimit = this.dailyLimit.consume(advanceAmount);
         this.monthlyLimit = this.monthlyLimit.consume(advanceAmount);
 
@@ -365,36 +374,35 @@ public class CreditLimit {
     }
 
     /**
-     * Libera crédito (ej: después de un pago)
+     * Libera crédito (pago del resumen). Lo que supere a lo consumido queda como saldo a favor.
+     *
+     * @return el monto acreditado como saldo a favor (cero si el pago no superó a lo consumido)
      */
-    public void releaseCredit(Money paymentAmount) {
+    public Money releaseCredit(Money paymentAmount) {
         if (paymentAmount == null || !paymentAmount.isPositive()) {
             throw new ValidationException("El monto del pago debe ser mayor a cero");
         }
-        // No se modela saldo a favor: un pago no puede liberar más de lo consumido
-        if (paymentAmount.isGreaterThan(this.consumedCredit.getAmount())) {
-            throw new BusinessRuleException(String.format(
-                    "El pago de %s supera el crédito consumido de %s",
-                    paymentAmount, this.consumedCredit.getAmount()));
-        }
 
-        this.consumedCredit = this.consumedCredit.release(paymentAmount);
+        Money balanceBefore = this.creditBalance.getAmount();
         // El pago cancela primero lo usado en adelantos (la deuda de mayor tasa) y el resto va a compras
         this.cashAdvanceConsumed = this.cashAdvanceConsumed.release(min(paymentAmount, this.cashAdvanceConsumed.getAmount()));
+        moveNetDebt(Money.zero(paymentAmount.getCurrencyCode()).subtract(paymentAmount));
+        keepCashAdvanceWithinConsumed();
         recalculateAvailableCredit();
         touch();
+        return this.creditBalance.getAmount().subtract(balanceBefore);
     }
 
     /**
      * Deshace el consumo de una transacción reversada o devuelta.
      * <p>
      * A diferencia de {@link #releaseCredit} (pago del resumen), devuelve también el cupo diario y mensual
-     * cuando la transacción original es del día o del mes en curso. Lo consumido baja a lo sumo hasta cero:
-     * si la tarjeta ya pagó ese consumo, el excedente no se restaura (no se modela saldo a favor).
+     * cuando la transacción original es del día o del mes en curso. Si la tarjeta ya pagó ese consumo, lo que
+     * supere a lo consumido queda como saldo a favor.
      *
      * @param amount       monto de la transacción reversada o devuelta
      * @param originalDate fecha de la transacción original (la que consumió el cupo)
-     * @return el monto que no se pudo restaurar en lo consumido (cero si se restauró todo)
+     * @return el monto acreditado como saldo a favor (cero si alcanzó con bajar lo consumido)
      */
     public Money restoreConsumption(Money amount, LocalDate originalDate) {
         return restoreConsumption(amount, originalDate, false);
@@ -412,23 +420,18 @@ public class CreditLimit {
             throw new ValidationException("La fecha de la transacción original es obligatoria");
         }
 
-        Money consumed = this.consumedCredit.getAmount();
-        Money restorable = amount.isGreaterThan(consumed) ? consumed : amount;
-        Money notRestored = amount.subtract(restorable);
-
-        if (!restorable.isZero()) {
-            this.consumedCredit = this.consumedCredit.release(restorable);
-        }
+        Money balanceBefore = this.creditBalance.getAmount();
         if (cashAdvance) {
             this.cashAdvanceConsumed = this.cashAdvanceConsumed.release(min(amount, this.cashAdvanceConsumed.getAmount()));
         }
+        moveNetDebt(Money.zero(amount.getCurrencyCode()).subtract(amount));
         keepCashAdvanceWithinConsumed();
         this.dailyLimit = this.dailyLimit.restore(amount, originalDate);
         this.monthlyLimit = this.monthlyLimit.restore(amount, YearMonth.from(originalDate));
 
         recalculateAvailableCredit();
         touch();
-        return notRestored;
+        return this.creditBalance.getAmount().subtract(balanceBefore);
     }
 
     /**
@@ -440,13 +443,15 @@ public class CreditLimit {
                 this.consumedCredit.getAmount(),
                 this.dailyLimit.currentConsumed(),
                 this.monthlyLimit.currentConsumed(),
-                this.cashAdvanceConsumed.getAmount()
+                this.cashAdvanceConsumed.getAmount(),
+                this.creditBalance.getAmount()
         );
     }
 
     /**
-     * Deshace exactamente lo que movió una operación: lo consumido y, si siguen siendo del mismo día o mes,
-     * el cupo diario y el mensual. Lo consumido no baja de cero.
+     * Deshace exactamente lo que movió una operación: la posición neta (consumido − saldo a favor) y, si siguen
+     * siendo del mismo día o mes, el cupo diario y el mensual. Si la posición queda negativa, es saldo a favor:
+     * por ejemplo, cancelar una compra que ya se pagó acredita su monto.
      * <p>
      * No valida límites, a propósito: deshacer una restauración significa que el reverso o la devolución nunca
      * ocurrieron, así que lo restaurado se vuelve a consumir aunque la tarjeta haya gastado ese disponible
@@ -454,11 +459,8 @@ public class CreditLimit {
      * rechazan por crédito insuficiente hasta que pague.
      */
     public void revertOperation(CreditOperation operation) {
-        Money consumed = this.consumedCredit.getAmount().subtract(operation.getCreditDelta());
-        if (consumed.isNegative()) {
-            consumed = Money.zero(consumed.getCurrencyCode());
-        }
-        this.consumedCredit = ConsumedCredit.of(consumed);
+        // Lo que la operación movió en la posición neta, con el signo contrario
+        moveNetDebt(operation.getBalanceDelta().subtract(operation.getCreditDelta()));
         Money cashAdvance = this.cashAdvanceConsumed.getAmount().subtract(operation.getCashAdvanceDelta());
         this.cashAdvanceConsumed = ConsumedCredit.of(cashAdvance.isNegative() ? Money.zero(cashAdvance.getCurrencyCode()) : cashAdvance);
         keepCashAdvanceWithinConsumed();
@@ -483,7 +485,22 @@ public class CreditLimit {
         return this.purchaseLimit.getAmount().getCurrencyCode();
     }
 
-    public record ConsumptionSnapshot(Money credit, Money daily, Money monthly, Money cashAdvance) {
+    /**
+     * Posición neta: lo consumido menos el saldo a favor (negativa si hay saldo a favor)
+     */
+    public Money getNetDebt() {
+        return this.consumedCredit.getAmount().subtract(this.creditBalance.getAmount());
+    }
+
+    /**
+     * Parte de un consumo que pasaría a deuda: lo que no cubre el saldo a favor
+     */
+    public Money debtPartOf(Money amount) {
+        Money debt = amount.subtract(this.creditBalance.getAmount());
+        return debt.isNegative() ? Money.zero(amount.getCurrencyCode()) : debt;
+    }
+
+    public record ConsumptionSnapshot(Money credit, Money daily, Money monthly, Money cashAdvance, Money balance) {
     }
 
     // ========================================
@@ -497,8 +514,7 @@ public class CreditLimit {
         try {
             validatePurchaseAmount(purchaseAmount);
 
-            return this.purchaseLimit.allows(purchaseAmount)
-                    && this.availableCredit.isSufficientFor(purchaseAmount)
+            return this.availableCredit.isSufficientFor(purchaseAmount)
                     && this.dailyLimit.allows(purchaseAmount)
                     && this.monthlyLimit.allows(purchaseAmount);
         } catch (Exception e) {
@@ -514,7 +530,7 @@ public class CreditLimit {
             validatePurchaseAmount(advanceAmount);
 
             return this.cashAdvanceLimit.isEnabled()
-                    && !advanceAmount.isGreaterThan(getCashAdvanceAvailable())
+                    && !debtPartOf(advanceAmount).isGreaterThan(getCashAdvanceAvailable())
                     && this.availableCredit.isSufficientFor(advanceAmount)
                     && this.dailyLimit.allows(advanceAmount)
                     && this.monthlyLimit.allows(advanceAmount);
@@ -547,10 +563,32 @@ public class CreditLimit {
         return a.isGreaterThan(b) ? b : a;
     }
 
+    /**
+     * Suma (o resta, si es negativo) a la posición neta y la reparte: positiva es lo consumido, negativa es el
+     * saldo a favor. Así el saldo cancela primero la deuda nueva y un pago o devolución de más se acredita.
+     *
+     * @return cuánto subió lo consumido (cero si bajó o no cambió)
+     */
+    private Money moveNetDebt(Money delta) {
+        Money consumedBefore = this.consumedCredit.getAmount();
+        Money net = getNetDebt().add(delta);
+        String currency = net.getCurrencyCode();
+        if (net.isNegative()) {
+            this.consumedCredit = ConsumedCredit.zero(currency);
+            this.creditBalance = CreditBalance.of(Money.zero(currency).subtract(net));
+        } else {
+            this.consumedCredit = ConsumedCredit.of(net);
+            this.creditBalance = CreditBalance.zero(currency);
+        }
+        Money increase = this.consumedCredit.getAmount().subtract(consumedBefore);
+        return increase.isNegative() ? Money.zero(currency) : increase;
+    }
+
     private void recalculateAvailableCredit() {
         this.availableCredit = AvailableCredit.calculate(
                 this.purchaseLimit.getAmount(),
-                this.consumedCredit.getAmount()
+                this.consumedCredit.getAmount(),
+                this.creditBalance.getAmount()
         );
     }
 
@@ -573,7 +611,8 @@ public class CreditLimit {
     private static void validateAssignment(
             CardId cardId,
             Money purchaseLimitAmount,
-            double cashAdvancePercentage
+            double cashAdvancePercentage,
+            LimitPolicy policy
     ) {
         if (cardId == null) {
             throw new ValidationException("El CardId es obligatorio");
@@ -584,6 +623,7 @@ public class CreditLimit {
         if (cashAdvancePercentage < 0 || cashAdvancePercentage > 1) {
             throw new ValidationException("El porcentaje de adelantos debe estar entre 0 y 1");
         }
+        Objects.requireNonNull(policy, "La política de límites es obligatoria");
     }
 
     private static void validateChangeAmount(Money amount) {

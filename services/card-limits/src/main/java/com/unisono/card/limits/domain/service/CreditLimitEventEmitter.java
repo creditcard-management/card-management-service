@@ -65,31 +65,34 @@ public class CreditLimitEventEmitter {
     }
 
     /**
-     * Publica consumed o released según cómo cambió el crédito consumido. Sin cambio (por ejemplo, una
-     * devolución de algo ya pagado) no publica nada.
+     * Publica consumed o released según cómo cambió la posición neta (consumido − saldo a favor): una compra
+     * pagada con saldo a favor consume aunque no suba lo consumido, y un pago de más libera aunque lo consumido
+     * ya esté en cero. Sin cambio no publica nada.
      *
-     * @param consumedBefore crédito consumido antes de la operación
+     * @param netDebtBefore posición neta antes de la operación ({@link CreditLimit#getNetDebt()})
      */
-    public void creditMoved(CreditLimit limit, Money consumedBefore, Movement movement, String operationId) {
-        BigDecimal before = consumedBefore.getAmount();
-        BigDecimal after = limit.getConsumedCredit().getAmount().getAmount();
+    public void creditMoved(CreditLimit limit, Money netDebtBefore, Movement movement, String operationId) {
+        BigDecimal before = netDebtBefore.getAmount();
+        BigDecimal after = limit.getNetDebt().getAmount();
         int direction = after.compareTo(before);
         if (direction == 0) {
-            log.debug("Credit limit {}: {} did not change the consumed credit, no event", limit.getId(), movement);
+            log.debug("Credit limit {}: {} did not change the credit position, no event", limit.getId(), movement);
             return;
         }
 
         String cardId = limit.getCardId().getValue();
+        BigDecimal consumed = limit.getConsumedCredit().getAmount().getAmount();
+        BigDecimal balance = limit.getCreditBalance().getAmount().getAmount();
         BigDecimal available = limit.getAvailableCredit().getAmount().getAmount();
         String currency = limit.getCurrencyCode();
         if (direction > 0) {
             eventOutbox.enqueue(KafkaTopics.CREDIT_LIMIT_CONSUMED, cardId, new CreditLimitConsumedEvent(
-                    cardId, limit.getId(), operationId, movement.name(), after.subtract(before), after, available,
-                    currency));
+                    cardId, limit.getId(), operationId, movement.name(), after.subtract(before), consumed, balance,
+                    available, currency));
         } else {
             eventOutbox.enqueue(KafkaTopics.CREDIT_LIMIT_RELEASED, cardId, new CreditLimitReleasedEvent(
-                    cardId, limit.getId(), operationId, movement.name(), before.subtract(after), after, available,
-                    currency));
+                    cardId, limit.getId(), operationId, movement.name(), before.subtract(after), consumed, balance,
+                    available, currency));
         }
     }
 

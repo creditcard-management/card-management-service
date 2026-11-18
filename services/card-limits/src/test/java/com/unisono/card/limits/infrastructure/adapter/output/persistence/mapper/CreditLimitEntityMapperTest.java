@@ -3,6 +3,7 @@ package com.unisono.card.limits.infrastructure.adapter.output.persistence.mapper
 import com.unisono.card.limits.domain.model.AvailableCredit;
 import com.unisono.card.limits.domain.model.CashAdvanceLimit;
 import com.unisono.card.limits.domain.model.ConsumedCredit;
+import com.unisono.card.limits.domain.model.CreditBalance;
 import com.unisono.card.limits.domain.model.CreditLimit;
 import com.unisono.card.limits.domain.model.CreditLimitHistory;
 import com.unisono.card.limits.domain.model.DailyLimit;
@@ -41,10 +42,11 @@ class CreditLimitEntityMapperTest {
         return CreditLimit.reconstituteFromPersistence(
                 ID,
                 CardId.of(CARD_ID),
-                PurchaseLimit.of(ars("500000.00")),
-                CashAdvanceLimit.of(cashAdvance),
+                PurchaseLimit.reconstituteFromPersistence(ars("500000.00")),
+                CashAdvanceLimit.reconstituteFromPersistence(cashAdvance),
                 ConsumedCredit.of(consumed),
                 ConsumedCredit.of(ars("7250.30")),
+                CreditBalance.zero("ARS"),
                 AvailableCredit.of(available),
                 DailyLimit.reconstituteFromPersistence(ars("80000.00"), ars("12345.67"), dailyResetDate),
                 MonthlyLimit.reconstituteFromPersistence(ars("300000.00"), ars("45000.10"), monthlyResetMonth),
@@ -148,6 +150,46 @@ class CreditLimitEntityMapperTest {
     }
 
     @Test
+    void creditBalanceGoesToItsColumnAndRoundTrips() {
+        CreditLimit withBalance = CreditLimit.reconstituteFromPersistence(
+                ID, CardId.of(CARD_ID),
+                PurchaseLimit.reconstituteFromPersistence(ars("500000.00")),
+                CashAdvanceLimit.reconstituteFromPersistence(ars("150000.00")),
+                ConsumedCredit.of(ars("0.00")), ConsumedCredit.of(ars("0.00")), CreditBalance.of(ars("1234.56")),
+                AvailableCredit.of(ars("501234.56")),
+                DailyLimit.reconstituteFromPersistence(ars("80000.00"), ars("0.00"), LocalDate.now()),
+                MonthlyLimit.reconstituteFromPersistence(ars("300000.00"), ars("0.00"), YearMonth.now()),
+                CREATED_AT, UPDATED_AT);
+
+        CreditLimitEntity entity = mapper.toEntity(withBalance);
+        CreditLimit loaded = mapper.toDomain(entity);
+
+        assertThat(entity.getCreditBalance()).isEqualByComparingTo("1234.56");
+        assertThat(entity.getConsumedCreditAmount()).isEqualByComparingTo("0.00");
+        assertThat(loaded.getCreditBalance().getAmount()).isEqualTo(ars("1234.56"));
+        assertSameState(loaded, withBalance);
+    }
+
+    @Test
+    void limitsOutsideTheCurrentPolicyStillLoad() {
+        // Asignado con reglas anteriores: compras 1.000 y adelantos 300 (hoy el mínimo de ARS es 2.500.000 y 500)
+        CreditLimit old = CreditLimit.reconstituteFromPersistence(
+                ID, CardId.of(CARD_ID),
+                PurchaseLimit.reconstituteFromPersistence(ars("1000.00")),
+                CashAdvanceLimit.reconstituteFromPersistence(ars("300.00")),
+                ConsumedCredit.of(ars("0.00")), ConsumedCredit.of(ars("0.00")), CreditBalance.zero("ARS"),
+                AvailableCredit.of(ars("1000.00")),
+                DailyLimit.reconstituteFromPersistence(ars("1000.00"), ars("0.00"), LocalDate.now()),
+                MonthlyLimit.reconstituteFromPersistence(ars("1000.00"), ars("0.00"), YearMonth.now()),
+                CREATED_AT, UPDATED_AT);
+
+        CreditLimit loaded = mapper.toDomain(mapper.toEntity(old));
+
+        assertThat(loaded.getPurchaseLimit().getAmount()).isEqualTo(ars("1000.00"));
+        assertThat(loaded.getCashAdvanceLimit().getAmount()).isEqualTo(ars("300.00"));
+    }
+
+    @Test
     void nullMapsToNull() {
         assertThat(mapper.toEntity(null)).isNull();
         assertThat(mapper.toDomain(null)).isNull();
@@ -225,6 +267,7 @@ class CreditLimitEntityMapperTest {
         assertThat(actual.getCashAdvanceLimit()).isEqualTo(expected.getCashAdvanceLimit());
         assertThat(actual.getConsumedCredit()).isEqualTo(expected.getConsumedCredit());
         assertThat(actual.getCashAdvanceConsumed()).isEqualTo(expected.getCashAdvanceConsumed());
+        assertThat(actual.getCreditBalance()).isEqualTo(expected.getCreditBalance());
         assertThat(actual.getAvailableCredit()).isEqualTo(expected.getAvailableCredit());
         assertThat(actual.getDailyLimit()).isEqualTo(expected.getDailyLimit());
         assertThat(actual.getMonthlyLimit()).isEqualTo(expected.getMonthlyLimit());

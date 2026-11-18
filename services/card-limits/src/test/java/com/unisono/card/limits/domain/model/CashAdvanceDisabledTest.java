@@ -27,7 +27,7 @@ class CashAdvanceDisabledTest {
 
     @Test
     void assignmentWithZeroPercentageHasNoCashAdvancesButCanPurchase() {
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0, "test");
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0, TestLimitPolicies.ars(), "test");
 
         assertThat(limit.getCashAdvanceLimit().getAmount().isZero()).isTrue();
         assertThat(limit.getCashAdvanceLimit().isEnabled()).isFalse();
@@ -42,7 +42,7 @@ class CashAdvanceDisabledTest {
 
     @Test
     void lowPurchaseLimitCanBeAssignedWithoutCashAdvances() {
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(1_000), 0, "test");
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(1_000), 0, TestLimitPolicies.ars(), "test");
 
         assertThat(limit.getPurchaseLimit().getAmount()).isEqualTo(Money.ofARS(1_000));
     }
@@ -50,39 +50,39 @@ class CashAdvanceDisabledTest {
     @Test
     void positivePercentageBelowTheMinimumIsStillRejected() {
         // 30% de 1.000 = 300 < 500
-        assertThatThrownBy(() -> CreditLimit.assign(CARD_ID, Money.ofARS(1_000), 0.3, "test"))
+        assertThatThrownBy(() -> CreditLimit.assign(CARD_ID, Money.ofARS(1_000), 0.3, TestLimitPolicies.ars(), "test"))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("cero para no habilitar adelantos");
     }
 
     @Test
     void cashAdvancesCanBeDisabledAndEnabledAgain() {
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test");
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test");
 
-        limit.updateCashAdvanceLimit(Money.ofARS(0), "Riesgo", "analista");
+        limit.updateCashAdvanceLimit(Money.ofARS(0), TestLimitPolicies.ars(), "Riesgo", "analista");
         assertThat(limit.getCashAdvanceLimit().isEnabled()).isFalse();
 
-        limit.updateCashAdvanceLimit(Money.ofARS(10_000), "Reactivación", "analista");
+        limit.updateCashAdvanceLimit(Money.ofARS(10_000), TestLimitPolicies.ars(), "Reactivación", "analista");
         assertThat(limit.canCashAdvance(Money.ofARS(10_000))).isTrue();
     }
 
     @Test
     void cashAdvanceLimitBetweenZeroAndTheMinimumOrNegativeIsInvalid() {
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test");
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test");
 
-        assertThatThrownBy(() -> limit.updateCashAdvanceLimit(Money.ofARS(300), "r", "a"))
+        assertThatThrownBy(() -> limit.updateCashAdvanceLimit(Money.ofARS(300), TestLimitPolicies.ars(), "r", "a"))
                 .isInstanceOf(ValidationException.class);
-        assertThatThrownBy(() -> CashAdvanceLimit.of(Money.ofARS(-1)))
+        assertThatThrownBy(() -> CashAdvanceLimit.of(Money.ofARS(-1), TestLimitPolicies.ars()))
                 .isInstanceOf(ValidationException.class);
     }
 
     @Test
     void purchaseLimitChangesRequireAPositiveAmount() {
-        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, "test");
+        CreditLimit limit = CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test");
 
-        assertThatThrownBy(() -> limit.increasePurchaseLimit(Money.ofARS(0), "r", "a"))
+        assertThatThrownBy(() -> limit.increasePurchaseLimit(Money.ofARS(0), TestLimitPolicies.ars(), "r", "a"))
                 .isInstanceOf(ValidationException.class);
-        assertThatThrownBy(() -> limit.decreasePurchaseLimit(Money.ofARS(0), "r", "a"))
+        assertThatThrownBy(() -> limit.decreasePurchaseLimit(Money.ofARS(0), TestLimitPolicies.ars(), "r", "a"))
                 .isInstanceOf(ValidationException.class);
     }
 }

@@ -47,6 +47,10 @@ public class CreditOperationEntity {
     @Column(name = "cash_advance_delta", nullable = false, precision = 15, scale = 2)
     private BigDecimal cashAdvanceDelta;
 
+    /** Lo que movió en credit_limits.credit_balance (positivo = acreditó, negativo = usó saldo a favor) */
+    @Column(name = "balance_delta", nullable = false, precision = 15, scale = 2)
+    private BigDecimal balanceDelta;
+
     @Column(name = "currency", nullable = false, length = 3)
     private String currency;
 

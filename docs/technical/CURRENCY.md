@@ -17,7 +17,7 @@
 
 ## 1. Responsabilidad dentro del sistema
 
-`card-currency` responde **cuánto vale un monto en otra moneda**. Los límites de crédito están en la moneda del sistema (ARS, ver [LIMITS.md §9.1](LIMITS.md)); cuando un pago llega en otra moneda, `payment-processing` le pide a este servicio la conversión antes de validar y consumir crédito.
+`card-currency` responde **cuánto vale un monto en otra moneda**. Los límites de crédito están en la moneda del sistema (ARS; las monedas de los límites se configuran en card-limits, ver [LIMITS.md §3.2.1](LIMITS.md)); cuando un pago llega en otra moneda, `payment-processing` le pide a este servicio la conversión antes de validar y consumir crédito.
 
 ```mermaid
 flowchart LR
@@ -99,7 +99,7 @@ Moneda que el sistema acepta para operar.
 
 Solo se aceptan monedas de 2 decimales porque `Money` redondea todo a 2 (§3.3): una moneda sin decimales o con 3 quedaría mal representada. `restore` no aplica la regla, así una moneda cargada a mano en la base se sigue pudiendo leer.
 
-La **moneda del sistema** se configura con `card.currency.system-currency` (por defecto `ARS`): es la de los límites de crédito, por eso no se puede desactivar. **Al arrancar**, `SystemCurrencyCheck` llama a `CurrencyCatalogService.verifySystemCurrency()`: si la moneda no está en el catálogo o está inactiva (solo puede pasar por un cambio directo en la base), la aplicación no arranca, con un mensaje que dice qué falta. Mejor eso que rechazar con 422 cada pago en otra moneda. Que coincida con la moneda de card-limits (ARS, fija en sus value objects) no se puede verificar desde acá (§9).
+La **moneda del sistema** se configura con `card.currency.system-currency` (por defecto `ARS`): es la de los límites de crédito, por eso no se puede desactivar. **Al arrancar**, `SystemCurrencyCheck` llama a `CurrencyCatalogService.verifySystemCurrency()`: si la moneda no está en el catálogo o está inactiva (solo puede pasar por un cambio directo en la base), la aplicación no arranca, con un mensaje que dice qué falta. Mejor eso que rechazar con 422 cada pago en otra moneda. Que card-limits tenga política para esa moneda (`card.limits.policies`, [LIMITS.md §3.2.1](LIMITS.md)) no se puede verificar desde acá (§9).
 
 ### 3.2 `ExchangeRate`
 
@@ -546,5 +546,5 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 6. **Sin seguridad.** Cualquiera con acceso de red puede publicar o cancelar cotizaciones y desactivar monedas; no hay autenticación, roles ni registro de quién publicó (`createdBy`).
 7. **Sin eventos.** Publicar o cancelar una cotización o cambiar el estado de una moneda no emite nada a Kafka. Publicarlos (`exchange-rate.published` / `.cancelled`, `currency.deactivated`) necesita un transactional outbox como el de card-limits (migración, relay y limpieza); conviene hacerlo cuando haya un consumidor. El módulo ya no declara `card-events` ni `spring-kafka`.
 8. **Dependencia síncrona sin caché.** Cada pago en moneda extranjera hace una llamada REST; si card-currency no responde, el pago falla con 503 (el `RestTemplate` de payment-processing corta a los 5 s de conexión y 10 s de lectura). No hay caché local ni *circuit breaker* de esta integración: una caché de cotizaciones podría cobrar con una tasa reemplazada.
-9. **Moneda del sistema contra la de card-limits.** card-currency verifica al arrancar que su `system-currency` exista y esté activa (§3.1), pero no que sea la misma que la de card-limits, que tiene ARS fija en sus value objects y no la expone. Si una cambia, la otra se tiene que cambiar a mano.
+9. **Moneda del sistema contra la de card-limits.** card-currency verifica al arrancar que su `system-currency` exista y esté activa (§3.1), pero no que card-limits tenga política para esa moneda: card-limits configura sus monedas por separado (`card.limits.policies`, [LIMITS.md §3.2.1](LIMITS.md)) y no las expone. Si una cambia, la otra se tiene que cambiar a mano.
 10. **DDL de tests copiado a mano.** `src/test/resources/currency-schema.sql` es una copia manual de V19 (§6.4): si la migración cambia y la copia no, los tests de persistencia validan contra un esquema viejo. Se podría usar la imagen de Flyway de `card-management-database` con Testcontainers, pero hoy no se publica en ningún registry.

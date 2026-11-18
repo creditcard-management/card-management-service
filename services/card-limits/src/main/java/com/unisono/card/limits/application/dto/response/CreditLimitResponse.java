@@ -38,6 +38,9 @@ public class CreditLimitResponse {
     @Schema(description = "Disponible para adelantos: tope menos lo usado (cero si el tope quedó por debajo)")
     private BigDecimal cashAdvanceAvailable;
 
+    @Schema(description = "Saldo a favor: lo pagado o devuelto de más. Se suma al disponible y lo usan primero los consumos siguientes", example = "0.00")
+    private BigDecimal creditBalance;
+
     @Schema(description = "Crédito disponible")
     private BigDecimal availableCredit;
 

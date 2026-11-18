@@ -17,7 +17,6 @@ import java.time.LocalDate;
 public class DailyLimit implements Serializable {
 
     private static final long serialVersionUID = 1L;
-    private static final Money DEFAULT_DAILY_LIMIT = Money.ofARS(100_000); // $100k por día
 
     private final Money amount;
     private final Money consumed;
@@ -34,14 +33,14 @@ public class DailyLimit implements Serializable {
      */
     public static DailyLimit of(Money amount) {
         validate(amount);
-        return new DailyLimit(amount, Money.zero(), LocalDate.now());
+        return new DailyLimit(amount, Money.zero(amount.getCurrencyCode()), LocalDate.now());
     }
 
     /**
-     * Crea un límite diario por defecto
+     * Crea el límite diario por defecto de la política de la moneda
      */
-    public static DailyLimit defaultLimit() {
-        return of(DEFAULT_DAILY_LIMIT);
+    public static DailyLimit defaultLimit(LimitPolicy policy) {
+        return of(policy.defaultDailyLimit());
     }
 
     /**
@@ -163,7 +162,7 @@ public class DailyLimit implements Serializable {
         validate(newAmount);
         // Mantiene el consumo actual si es del mismo día
         if (needsReset()) {
-            return new DailyLimit(newAmount, Money.zero(), LocalDate.now());
+            return new DailyLimit(newAmount, Money.zero(newAmount.getCurrencyCode()), LocalDate.now());
         }
         return new DailyLimit(newAmount, this.consumed, this.resetDate);
     }

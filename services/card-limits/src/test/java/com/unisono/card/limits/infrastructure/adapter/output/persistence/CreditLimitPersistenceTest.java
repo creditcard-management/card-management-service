@@ -1,5 +1,6 @@
 package com.unisono.card.limits.infrastructure.adapter.output.persistence;
 
+import com.unisono.card.limits.domain.model.TestLimitPolicies;
 import com.unisono.card.limits.domain.model.CreditLimit;
 import com.unisono.card.limits.domain.model.CreditLimitHistory;
 import com.unisono.card.limits.domain.model.LimitType;
@@ -86,7 +87,7 @@ class CreditLimitPersistenceTest {
         limit.consumeForPurchase(ars("12345.67"));
         limit.consumeForCashAdvance(ars("2000.50"));
         limit.updateTemporalLimits(ars("80000.00"), ars("300000.00"), "Ajuste", "analista");
-        limit.updateCashAdvanceLimit(ars("0.00"), "Sin adelantos", "analista");
+        limit.updateCashAdvanceLimit(ars("0.00"), TestLimitPolicies.ars(), "Sin adelantos", "analista");
 
         inTransaction(() -> creditLimits.save(limit));
         CreditLimit loaded = inTransaction(() -> creditLimits.findById(limit.getId()).orElseThrow());
@@ -120,7 +121,7 @@ class CreditLimitPersistenceTest {
         CreditLimit first = inTransaction(() -> creditLimits.findById(limit.getId()).orElseThrow());
 
         first.consumeForPurchase(ars("1000.00"));
-        first.increasePurchaseLimit(ars("50000.00"), "Aumento", "analista");
+        first.increasePurchaseLimit(ars("50000.00"), TestLimitPolicies.ars(), "Aumento", "analista");
         inTransaction(() -> creditLimits.save(first));
         CreditLimit second = inTransaction(() -> creditLimits.findById(limit.getId()).orElseThrow());
 
@@ -134,7 +135,7 @@ class CreditLimitPersistenceTest {
     @Test
     void historyIsReadBackNewestFirstWithTheSameValues() {
         CreditLimit limit = newLimit();
-        limit.increasePurchaseLimit(ars("50000.00"), "Aumento por antigüedad", "analista");
+        limit.increasePurchaseLimit(ars("50000.00"), TestLimitPolicies.ars(), "Aumento por antigüedad", "analista");
         limit.updateDailyLimit(ars("80000.00"), "Ajuste diario", "analista");
         inTransaction(() -> {
             creditLimits.save(limit);
@@ -194,7 +195,7 @@ class CreditLimitPersistenceTest {
     // ========================================
 
     private static CreditLimit newLimit() {
-        return CreditLimit.assign(CardId.of(UUID.randomUUID().toString()), ars("500000.00"), 0.3, "test");
+        return CreditLimit.assign(CardId.of(UUID.randomUUID().toString()), ars("500000.00"), 0.3, TestLimitPolicies.ars(), "test");
     }
 
     private static Money ars(String amount) {

@@ -27,8 +27,8 @@ public class ConsumedCredit implements Serializable {
         return new ConsumedCredit(amount);
     }
 
-    public static ConsumedCredit zero() {
-        return of(Money.zero());
+    public static ConsumedCredit zero(String currencyCode) {
+        return of(Money.zero(currencyCode));
     }
 
     private static void validate(Money amount) {
