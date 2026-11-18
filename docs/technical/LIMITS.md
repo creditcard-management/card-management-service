@@ -404,7 +404,12 @@ sequenceDiagram
     P-->>Caller: CreditLimitResponse
 ```
 
-La validación usa el **`cardId`**; el consumo usa el **`creditLimitId`**. Quien llama necesita los dos (el segundo se obtiene con `GET /card/{cardId}`). Validar y consumir son dos llamadas separadas, sin reserva: entre una y otra, otra operación puede consumir el disponible.
+La validación usa el **`cardId`**; el consumo usa el **`creditLimitId`**. Quien llama necesita los dos (el segundo se obtiene con `GET /card/{cardId}`).
+
+**Validar no reserva; consumir es lo que retiene el crédito.**
+
+- `validate/*` es orientativo: entre la validación y el consumo, otra operación puede usar el disponible. Pero no se puede consumir de más: `consume-*` vuelve a validar todas las reglas con la fila del límite bloqueada (§4.4) y, si ya no alcanza, responde 422. payment-processing autoriza antes de consumir y, si el consumo falla, anula la autorización y declina con `51` ([PAYMENT.md §4.1](PAYMENT.md)).
+- **La reserva de fondos es la preautorización** de payment-processing ([PAYMENT.md §4.6](PAYMENT.md)): `pre-authorize` consume el crédito como retención, la captura no lo vuelve a tocar, y si se reversa o vence (7 días) la retención se libera con `restore-credit`. card-limits no distingue lo retenido de lo consumido: una preautorización sin capturar figura en `consumedCredit`.
 
 ### 5.3 Reinicio diario y mensual
 
@@ -543,7 +548,5 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 
 ## 9. Limitaciones conocidas y deuda técnica
 
-### 9.1 Reglas de negocio
-
-1. **Sin reserva (hold).** Validar y consumir son operaciones separadas: no hay reserva de fondos ni confirmación posterior.
+No hay deuda técnica conocida propia del módulo. Las limitaciones de la retención de fondos (lo retenido figura como consumido y no hay captura parcial) están en [PAYMENT.md §10](PAYMENT.md), porque la preautorización vive en payment-processing (§5.2).
   

@@ -635,7 +635,7 @@ Además:
 
 ### 10.1 Reglas de negocio
 
-1. **Sin captura parcial:** la captura de una preautorización es siempre por el monto total. Para cobrar menos hay que reversarla y hacer una compra nueva.
+1. **Sin captura parcial y retención como consumo:** la captura de una preautorización es siempre por el monto total. Para cobrar menos hay que reversarla y hacer una compra nueva. Además, la retención es un consumo común en card-limits: una preautorización sin capturar figura en lo consumido, sin distinguirse de una compra ([LIMITS.md §5.2](LIMITS.md)). Resolver las dos cosas requiere operaciones de retención y captura en card-limits (un monto retenido aparte, que la captura convierta total o parcialmente en consumo y libere el resto).
 2. **Tope por transacción en la moneda del límite:** `TransactionValidationService` controla el máximo de 50.000 sobre el monto convertido, y el request también limita `amount` a 50.000 en su propia moneda. Con ARS como moneda del límite, una compra de más de unos USD 43 (a 1150) supera el tope.
 3. **El CVV no cuenta intentos:** a diferencia del PIN, un CVV incorrecto no suma intentos fallidos en card-data ni bloquea la tarjeta.
 
