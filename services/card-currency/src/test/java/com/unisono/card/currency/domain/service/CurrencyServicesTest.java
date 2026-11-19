@@ -37,6 +37,7 @@ class CurrencyServicesTest {
 
     private final MutableClock clock = new MutableClock(T0);
     private InMemoryRepositories.Currencies currencies;
+    private InMemoryRepositories.CreditLimitCurrencies creditLimitCurrencies;
     private InMemoryRepositories.Rates rates;
     private CurrencyCatalogService catalog;
     private ExchangeRateService exchangeRates;
@@ -46,7 +47,9 @@ class CurrencyServicesTest {
     void setUp() {
         currencies = new InMemoryRepositories.Currencies();
         rates = new InMemoryRepositories.Rates();
-        catalog = new CurrencyCatalogService(currencies, clock, "ARS");
+        creditLimitCurrencies = new InMemoryRepositories.CreditLimitCurrencies();
+        creditLimitCurrencies.codes.add("ARS");
+        catalog = new CurrencyCatalogService(currencies, creditLimitCurrencies, clock);
         exchangeRates = new ExchangeRateService(rates, catalog, clock, 3);
         conversions = new CurrencyConversionService(rates, catalog, clock);
         catalog.register("ARS", "Peso argentino");
@@ -78,27 +81,39 @@ class CurrencyServicesTest {
         }
 
         @Test
-        void systemCurrencyCannotBeDeactivated() {
-            assertThatThrownBy(() -> catalog.deactivate("ARS")).isInstanceOf(BusinessRuleException.class);
+        void aCurrencyWithCreditLimitsCannotBeDeactivated() {
+            assertThatThrownBy(() -> catalog.deactivate("ars"))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .hasMessageContaining("ARS").hasMessageContaining("credit limits");
+            assertThat(catalog.get("ARS").isActive()).isTrue();
         }
 
         @Test
-        void verifySystemCurrencyPassesWhenRegisteredAndActive() {
-            catalog.verifySystemCurrency();
+        void anyCurrencyWithCreditLimitsIsProtectedNotOnlyArs() {
+            creditLimitCurrencies.codes.add("USD");
+
+            assertThatThrownBy(() -> catalog.deactivate("USD")).isInstanceOf(BusinessRuleException.class);
+            creditLimitCurrencies.codes.remove("ARS");
+            assertThat(catalog.deactivate("ARS").isActive()).isFalse();
         }
 
         @Test
-        void verifySystemCurrencyFailsWhenMissingOrInactive() {
-            CurrencyCatalogService withBrl = new CurrencyCatalogService(currencies, clock, "BRL");
-            assertThatThrownBy(withBrl::verifySystemCurrency)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("BRL").hasMessageContaining("not registered");
+        void deactivatingAnUnknownCurrencyIsNotFound() {
+            assertThatThrownBy(() -> catalog.deactivate("BRL")).isInstanceOf(NotFoundException.class);
+        }
 
-            // Inactiva solo puede quedar por un cambio directo en la base: deactivate() no lo permite
+        @Test
+        void startupCheckReportsNothingWhenEveryCreditLimitCurrencyIsAvailable() {
+            assertThat(catalog.warnAboutCreditLimitsInUnavailableCurrencies()).isEmpty();
+        }
+
+        @Test
+        void startupCheckReportsCreditLimitCurrenciesMissingOrInactive() {
+            creditLimitCurrencies.codes.add("BRL"); // no registrada
+            // Inactiva solo puede quedar por datos anteriores o un cambio directo en la base
             currencies.save(SupportedCurrency.restore("ARS", "Peso argentino", false, T0, T0));
-            assertThatThrownBy(catalog::verifySystemCurrency)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("inactive");
+
+            assertThat(catalog.warnAboutCreditLimitsInUnavailableCurrencies()).containsExactly("ARS", "BRL");
         }
 
         @Test

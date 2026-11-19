@@ -23,10 +23,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,13 +57,15 @@ class CreditLimitChangeEventsTest {
     private CreditOperationRepository creditOperationRepository;
 
     private final List<Map.Entry<String, DomainEvent>> outbox = new ArrayList<>();
+    /** Monedas activas en el catálogo de card-currency */
+    private final Set<String> activeCurrencies = new HashSet<>(Set.of("ARS"));
     private CreditLimitManagementService service;
 
     @BeforeEach
     void setUp() {
         service = new CreditLimitManagementService(creditLimitRepository, cardValidationPort, creditOperationRepository,
                 new CreditLimitEventEmitter((topic, key, event) -> outbox.add(Map.entry(topic, event))),
-                TestLimitPolicies.port());
+                TestLimitPolicies.port(), activeCurrencies::contains);
         lenient().when(creditLimitRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(creditLimitRepository.saveHistory(any())).thenAnswer(inv -> inv.getArgument(0));
     }
@@ -84,6 +89,24 @@ class CreditLimitChangeEventsTest {
         assertThat(assigned.getMonthlyLimitAmount()).isEqualByComparingTo("300000");
         assertThat(assigned.getCurrency()).isEqualTo("ARS");
         assertThat(assigned.getAssignedBy()).isEqualTo("admin");
+    }
+
+    @Test
+    void assignmentInACurrencyNotActiveInTheCatalogIsRejected() {
+        when(cardValidationPort.cardExists(CARD_ID)).thenReturn(true);
+        when(cardValidationPort.canAssignCreditLimit(CARD_ID)).thenReturn(true);
+        Money usd = Money.of(BigDecimal.valueOf(5_000), "USD"); // USD tiene política, pero no está activa
+
+        assertThatThrownBy(() -> service.execute(new AssignCreditLimitCommand(CARD_ID, usd, 0.3, null, null, "admin")))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("USD")
+                .hasMessageContaining("catálogo de monedas");
+        verify(creditLimitRepository, never()).save(any());
+        assertThat(outbox).isEmpty();
+
+        activeCurrencies.add("USD");
+        CreditLimit limit = service.execute(new AssignCreditLimitCommand(CARD_ID, usd, 0.3, null, null, "admin"));
+        assertThat(limit.getCurrencyCode()).isEqualTo("USD");
     }
 
     @Test

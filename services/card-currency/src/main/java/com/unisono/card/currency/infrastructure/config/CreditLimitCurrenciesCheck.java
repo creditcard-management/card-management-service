@@ -7,20 +7,18 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
 /**
- * Al arrancar, verifica que la moneda del sistema esté dada de alta y activa. Si no, la aplicación no arranca:
- * mejor fallar acá que rechazar con 422 cada pago en otra moneda.
- * <p>
- * Que coincida con la moneda de los límites de card-limits (ARS, fija en sus value objects) no se puede verificar
- * desde acá: se configura por separado.
+ * Al arrancar, avisa (WARN) si hay límites de crédito en monedas que no están dadas de alta o están inactivas. No
+ * impide el arranque: es un problema de datos (límites anteriores a este control), y los pagos en otras monedas
+ * de esas tarjetas fallan con 422 hasta que se corrija el catálogo.
  */
 @Component
 @RequiredArgsConstructor
-public class SystemCurrencyCheck implements ApplicationRunner {
+public class CreditLimitCurrenciesCheck implements ApplicationRunner {
 
     private final CurrencyCatalogService currencyCatalog;
 
     @Override
     public void run(ApplicationArguments args) {
-        currencyCatalog.verifySystemCurrency();
+        currencyCatalog.warnAboutCreditLimitsInUnavailableCurrencies();
     }
 }

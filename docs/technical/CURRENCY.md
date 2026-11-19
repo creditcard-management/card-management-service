@@ -8,7 +8,7 @@
 | Clase principal | `com.unisono.card.currency.CardCurrencyApplication` |
 | Puerto | `8086` |
 | Base paths REST | `/api/v1/currencies`, `/api/v1/exchange-rates` |
-| Base de datos | PostgreSQL `card_management_db` — tablas propias `currencies` y `exchange_rates` (migración V19). No lee tablas de otros módulos |
+| Base de datos | PostgreSQL `card_management_db` — tablas propias `currencies` y `exchange_rates` (migración V19); lee `credit_limits` (§3.1) |
 | Mensajería | Ninguna: no publica ni consume (no tiene dependencias de Kafka ni de `card-events`, §9) |
 | Dependencias internas | `card-shared` (`Money`, excepciones `NotFoundException`, `ValidationException`, `InvalidValueObjectException`, `BusinessRuleException`) |
 | Swagger UI | `http://localhost:8086/swagger-ui.html` (OpenAPI en `/api-docs`) |
@@ -17,7 +17,7 @@
 
 ## 1. Responsabilidad dentro del sistema
 
-`card-currency` responde **cuánto vale un monto en otra moneda**. Los límites de crédito están en la moneda del sistema (ARS; las monedas de los límites se configuran en card-limits, ver [LIMITS.md §3.2.1](LIMITS.md)); cuando un pago llega en otra moneda, `payment-processing` le pide a este servicio la conversión antes de validar y consumir crédito.
+`card-currency` responde **cuánto vale un monto en otra moneda**. Cada límite de crédito está en una moneda del catálogo (hoy ARS; ver [LIMITS.md §3.2.1](LIMITS.md)); cuando un pago llega en otra moneda, `payment-processing` le pide a este servicio la conversión antes de validar y consumir crédito.
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,7 @@ flowchart LR
     PP[payment-processing :8085] -->|REST POST /exchange-rates/convert<br/>solo si la moneda del pago ≠ la del límite| CUR
 ```
 
-- **Mantiene el catálogo** de monedas aceptadas: solo las activas se cotizan y convierten. La moneda del sistema no se puede desactivar.
+- **Mantiene el catálogo** de monedas aceptadas: solo las activas se cotizan y convierten. Una moneda con límites de crédito no se puede desactivar.
 - **Publica cotizaciones** por par (`1 base = rate quote`) con vigencia `[validFrom, validTo)`. Una sola cotización abierta por par: publicar una nueva cierra la anterior. Cada par se cotiza **en un solo sentido** (USD/ARS o ARS/USD, no los dos).
 - **Cancela cotizaciones programadas** que todavía no empezaron; la anterior del par sigue vigente.
 - **Convierte montos** con la cotización vigente en un instante (por defecto, ahora), directa o inversa.
@@ -48,7 +48,7 @@ com.unisono.card.currency
 │   ├── model        SupportedCurrency, ExchangeRate, CurrencyPair (VO), Conversion (VO), RateSource
 │   ├── port.input   ManageCurrenciesUseCase, ExchangeRateUseCase (+ PublishRateCommand),
 │   │                ConvertAmountUseCase
-│   ├── port.output  CurrencyRepository, ExchangeRateRepository
+│   ├── port.output  CurrencyRepository, ExchangeRateRepository, CreditLimitCurrencyPort
 │   ├── service      CurrencyCatalogService, ExchangeRateService, CurrencyConversionService
 │   └── exception    CurrencyAlreadyExistsException, CurrencyNotSupportedException,
 │                    ExchangeRateNotFoundException
@@ -61,8 +61,9 @@ com.unisono.card.currency
     ├── adapter.output.persistence   CurrencyRepositoryAdapter, ExchangeRateRepositoryAdapter,
     │                                CurrencyEntity, ExchangeRateEntity,
     │                                JpaCurrencyRepository, JpaExchangeRateRepository
+    ├── adapter.output.creditlimit   CreditLimitCurrencyAdapter (lee credit_limits de card-limits)
     └── config                       CurrencyDatabaseConfig (JPA), ClockConfig (Clock UTC), SwaggerConfig,
-                                     SystemCurrencyCheck (verificación al arrancar)
+                                     CreditLimitCurrenciesCheck (aviso al arrancar)
 ```
 
 Los servicios reciben un `java.time.Clock` (bean `Clock.systemUTC()`), así los tests fijan la hora. `ExchangeRateService` y `CurrencyConversionService` dependen de `CurrencyCatalogService` (no del puerto) para usar `requireActive(...)`.
@@ -95,11 +96,15 @@ Moneda que el sistema acepta para operar.
 |---|---|---|
 | `register(code, name, now)` | Código ISO válido, nombre obligatorio ≤ 100, **moneda de 2 decimales** (`SUPPORTED_FRACTION_DIGITS`; JPY, CLP, BHD, KWD → `BusinessRuleException` 422) | Nueva moneda **activa** |
 | `activate(now)` | — | Idempotente: si ya estaba activa no cambia nada |
-| `deactivate(systemCurrency, now)` | No puede ser la moneda del sistema (`BusinessRuleException` → 422) | Idempotente. No toca sus cotizaciones |
+| `deactivate(hasCreditLimits, now)` | No puede tener límites de crédito (`BusinessRuleException` → 422) | Idempotente. No toca sus cotizaciones |
 
 Solo se aceptan monedas de 2 decimales porque `Money` redondea todo a 2 (§3.3): una moneda sin decimales o con 3 quedaría mal representada. `restore` no aplica la regla, así una moneda cargada a mano en la base se sigue pudiendo leer.
 
-La **moneda del sistema** se configura con `card.currency.system-currency` (por defecto `ARS`): es la de los límites de crédito, por eso no se puede desactivar. **Al arrancar**, `SystemCurrencyCheck` llama a `CurrencyCatalogService.verifySystemCurrency()`: si la moneda no está en el catálogo o está inactiva (solo puede pasar por un cambio directo en la base), la aplicación no arranca, con un mensaje que dice qué falta. Mejor eso que rechazar con 422 cada pago en otra moneda. Que card-limits tenga política para esa moneda (`card.limits.policies`, [LIMITS.md §3.2.1](LIMITS.md)) no se puede verificar desde acá (§9).
+**Monedas de los límites de crédito.** Los pagos en otra moneda convierten hacia la moneda del límite de la tarjeta, así que esa moneda tiene que estar activa. La coordinación con card-limits va por la base compartida, sin configuración que mantener a mano:
+
+- **Baja:** `CurrencyCatalogService.deactivate` bloquea la fila de la moneda (`SELECT … FOR UPDATE`) y consulta `credit_limits` (`CreditLimitCurrencyPort`, límites no eliminados, por `purchase_limit_currency`). Si hay alguno, responde **422**.
+- **Asignación:** card-limits solo asigna límites en monedas dadas de alta y activas, y lee la fila con `FOR SHARE` ([LIMITS.md §3.6](LIMITS.md)). Las dos operaciones se esperan entre sí: la segunda ve lo que confirmó la primera.
+- **Al arrancar**, `CreditLimitCurrenciesCheck` loguea un `WARN` por cada moneda con límites que no está dada de alta o está inactiva (datos anteriores a este control). No impide el arranque: los pagos en otra moneda de esas tarjetas responden 422 hasta que se corrija el catálogo.
 
 ### 3.2 `ExchangeRate`
 
@@ -173,7 +178,7 @@ Ejemplo con la cotización `USD/ARS = 1150.50`:
 | `GET /` (`?activeOnly=true`) | — | **200** lista ordenada por código. Por defecto incluye las inactivas |
 | `GET /{code}` | — | **200** `CurrencyResponse`. **404** si no existe, **400** si el código no es ISO 4217 |
 | `PUT /{code}/activate` | — | **200** `CurrencyResponse` |
-| `PUT /{code}/deactivate` | — | **200** `CurrencyResponse`. **422** si es la moneda del sistema |
+| `PUT /{code}/deactivate` | — | **200** `CurrencyResponse`. **422** si hay límites de crédito en esa moneda |
 
 Validación del request: `code` obligatorio, 3 letras (`[A-Za-z]{3}`, se normaliza a mayúsculas) y además ISO 4217 válido (`XXZ` → 400); `name` obligatorio, ≤ 100.
 
@@ -268,7 +273,7 @@ Mismo formato que el resto de los servicios:
 | `HttpMessageNotReadableException`, `MethodArgumentTypeMismatchException` | 400 `"Malformed request"` | JSON inválido, `at` con formato inválido, `limit` no numérico |
 | `CurrencyAlreadyExistsException` | 409 | Alta de una moneda que ya existe |
 | `DataIntegrityViolationException`, `PessimisticLockingFailureException` | 409 `"Concurrent update, retry the request"` | Red de seguridad ante escrituras concurrentes (índice único de cotización abierta, PK de moneda) |
-| `BusinessRuleException` (incluye `CurrencyNotSupportedException`) | 422 | Moneda inactiva o no dada de alta al publicar, consultar la vigente o convertir; alta de una moneda sin 2 decimales; desactivar la moneda del sistema; `effectiveFrom` pasado; nueva cotización que no empieza después de la abierta; par inverso ya cotizado; cancelar una cotización que ya empezó |
+| `BusinessRuleException` (incluye `CurrencyNotSupportedException`) | 422 | Moneda inactiva o no dada de alta al publicar, consultar la vigente o convertir; alta de una moneda sin 2 decimales; desactivar una moneda con límites de crédito; `effectiveFrom` pasado; nueva cotización que no empieza después de la abierta; par inverso ya cotizado; cancelar una cotización que ya empezó |
 | Otras | 500 | — |
 
 Todos los 4xx se loguean en `WARN`. A diferencia de otros servicios, los endpoints **no tienen anotaciones `@ApiResponse`**: Swagger solo documenta la respuesta exitosa.
@@ -377,7 +382,7 @@ sequenceDiagram
 
 ### 5.4 Baja de una moneda
 
-`PUT /currencies/{code}/deactivate` no borra ni cierra sus cotizaciones. Desde ese momento:
+`PUT /currencies/{code}/deactivate` se rechaza con 422 si hay límites de crédito en la moneda (§3.1). No borra ni cierra sus cotizaciones. Desde ese momento:
 
 - Publicar cotizaciones con esa moneda → 422.
 - Convertir desde o hacia esa moneda → 422 (en `payment-processing`, `CURRENCY_NOT_SUPPORTED`).
@@ -439,6 +444,7 @@ La base **no impide** superposiciones entre cotizaciones cerradas del mismo par 
 ### 6.4 Notas
 
 - `src/test/resources/currency-schema.sql` es una **copia del DDL de V19** (sin los `COMMENT ON TABLE`) que usa `CurrencyPersistenceTest`. Si cambia la migración, hay que actualizarla a mano.
+- **Lectura de `credit_limits`** (de card-limits, `CreditLimitCurrencyAdapter` con `JdbcTemplate`): solo `purchase_limit_currency` y `deleted`, para saber en qué monedas hay límites (§3.1).
 - `payment-processing` guarda el `rateId` en `transactions.exchange_rate_id` (V20, `exchange_rate` pasa a `numeric(19,8)`), **sin FK** a `exchange_rates`: son bases lógicas de servicios distintos aunque compartan la instancia.
 - No hay soft delete. La única baja física es la cancelación de una cotización programada (§5.3); las monedas no se borran.
 
@@ -460,7 +466,6 @@ La base **no impide** superposiciones entre cotizaciones cerradas del mismo par 
 | `spring.jpa.open-in-view` | `false` |
 | `spring.jpa.properties.hibernate.jdbc.time_zone` | `UTC` |
 | `spring.flyway.enabled` | `false` |
-| `card.currency.system-currency` | `ARS` — moneda de los límites; no se puede desactivar |
 | `card.currency.history-max-size` | `100` — tope de `limit` en el historial (mínimo efectivo 1) |
 | `management.endpoints.web.exposure.include` | `health,info,metrics` |
 | `springdoc.api-docs.path` / `swagger-ui.path` | `/api-docs` / `/swagger-ui.html` |
@@ -499,7 +504,7 @@ La carpeta *5. card-currency* de la [colección de Postman](../postman/Card%20Ma
 ### 7.3 Observabilidad
 
 - `GET /actuator/health` (con detalles, incluye la base), `/actuator/info`, `/actuator/metrics`.
-- `INFO` al arrancar, con la moneda del sistema verificada; al dar de alta o desactivar monedas, al publicar cotizaciones (par, tasa, vigencia y `rateId` reemplazado) y al cancelarlas (par, `rateId` y la anterior que se extendió); `DEBUG` en las conversiones inversas; `WARN` en cada 4xx y en los conflictos de concurrencia.
+- Al arrancar, `WARN` por cada moneda con límites de crédito que no está disponible (o `INFO` si están todas); al dar de alta o desactivar monedas, al publicar cotizaciones (par, tasa, vigencia y `rateId` reemplazado) y al cancelarlas (par, `rateId` y la anterior que se extendió); `DEBUG` en las conversiones inversas; `WARN` en cada 4xx y en los conflictos de concurrencia.
 
 ### 7.4 Tests
 
@@ -509,10 +514,11 @@ mvn -pl services/card-currency -am test
 
 | Tests | Cubren |
 |---|---|
-| `CurrencyPairTest`, `ExchangeRateTest`, `SupportedCurrencyTest` | Códigos ISO, pares inválidos, precisión de tasas, vigencias, cierre, cancelación y extensión de cotizaciones, monedas de 2 decimales, moneda del sistema |
-| `CurrencyServicesTest` (con `InMemoryRepositories`) | Catálogo, verificación de la moneda del sistema (registrada, ausente, inactiva), publicación (inmediata, futura, retroactiva, monedas inactivas, par inverso), cancelación (abierta, en el medio, única, ya empezada), consulta con monedas inactivas, historial, conversión directa, inversa, identidad y en un instante |
+| `CurrencyPairTest`, `ExchangeRateTest`, `SupportedCurrencyTest` | Códigos ISO, pares inválidos, precisión de tasas, vigencias, cierre, cancelación y extensión de cotizaciones, monedas de 2 decimales, baja con límites de crédito |
+| `CurrencyServicesTest` (con `InMemoryRepositories`) | Catálogo, baja de monedas con límites de crédito, aviso al arrancar (monedas con límites ausentes o inactivas), publicación (inmediata, futura, retroactiva, monedas inactivas, par inverso), cancelación (abierta, en el medio, única, ya empezada), consulta con monedas inactivas, historial, conversión directa, inversa, identidad y en un instante |
 | `CurrencyApiTest` | Endpoints (incluido el `DELETE`), Bean Validation y mapeo de errores (MockMvc) |
 | `CurrencyPersistenceTest` | Mapeo JPA contra el DDL de V19, vigencias, índice único de cotización abierta, cancelación con reapertura de la anterior, `existsForPair` y el advisory lock en `pg_locks` (namespace y clave, igual para los dos sentidos) (Testcontainers: **requiere Docker**) |
+| `CreditLimitCurrencyAdapterTest` | Monedas de `credit_limits` (sin los eliminados) y que el bloqueo de una baja hace esperar la lectura `FOR SHARE` de card-limits (Testcontainers: **requiere Docker**) |
 | `PairLockKeyTest` | Clave del lock: igual para los dos sentidos, sin colisiones ni fuera de rango entre todos los pares de monedas ISO 4217 de la JVM |
 
 Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contrato REST y el mapeo de 404/422/5xx.
@@ -524,7 +530,7 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 | Módulo | Relación | Estado |
 |---|---|---|
 | `payment-processing` | Llama a `POST /exchange-rates/convert` cuando la moneda del pago difiere de la del límite; guarda `appliedRate` y `rateId` en la transacción | Funciona ([PAYMENT.md §4 y §7](PAYMENT.md)) |
-| `card-limits` | Sin integración directa. Sus límites están en ARS, que es la `system-currency` de card-currency; las dos configuraciones deben coincidir a mano | Acoplamiento implícito por configuración |
+| `card-limits` | card-currency lee `credit_limits` para no desactivar monedas con límites; card-limits lee `currencies` para asignar solo en monedas activas (§3.1) | Funciona (acoplamiento por base compartida) |
 | `card-shared` | `Money` (escala 2), excepciones base | Funciona |
 | `card-events` | Sin relación: no hay contratos `exchange-rate.*` (§9) | Pendiente |
 | `card-data`, `card-lifecycle` | Ninguna | — |
@@ -546,5 +552,4 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 6. **Sin seguridad.** Cualquiera con acceso de red puede publicar o cancelar cotizaciones y desactivar monedas; no hay autenticación, roles ni registro de quién publicó (`createdBy`).
 7. **Sin eventos.** Publicar o cancelar una cotización o cambiar el estado de una moneda no emite nada a Kafka. Publicarlos (`exchange-rate.published` / `.cancelled`, `currency.deactivated`) necesita un transactional outbox como el de card-limits (migración, relay y limpieza); conviene hacerlo cuando haya un consumidor. El módulo ya no declara `card-events` ni `spring-kafka`.
 8. **Dependencia síncrona sin caché.** Cada pago en moneda extranjera hace una llamada REST; si card-currency no responde, el pago falla con 503 (el `RestTemplate` de payment-processing corta a los 5 s de conexión y 10 s de lectura). No hay caché local ni *circuit breaker* de esta integración: una caché de cotizaciones podría cobrar con una tasa reemplazada.
-9. **Moneda del sistema contra la de card-limits.** card-currency verifica al arrancar que su `system-currency` exista y esté activa (§3.1), pero no que card-limits tenga política para esa moneda: card-limits configura sus monedas por separado (`card.limits.policies`, [LIMITS.md §3.2.1](LIMITS.md)) y no las expone. Si una cambia, la otra se tiene que cambiar a mano.
-10. **DDL de tests copiado a mano.** `src/test/resources/currency-schema.sql` es una copia manual de V19 (§6.4): si la migración cambia y la copia no, los tests de persistencia validan contra un esquema viejo. Se podría usar la imagen de Flyway de `card-management-database` con Testcontainers, pero hoy no se publica en ningún registry.
+9. **DDL de tests copiado a mano.** `src/test/resources/currency-schema.sql` es una copia manual de V19 (§6.4): si la migración cambia y la copia no, los tests de persistencia validan contra un esquema viejo. Se podría usar la imagen de Flyway de `card-management-database` con Testcontainers, pero hoy no se publica en ningún registry.

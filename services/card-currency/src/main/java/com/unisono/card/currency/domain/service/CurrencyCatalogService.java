@@ -5,35 +5,33 @@ import com.unisono.card.currency.domain.exception.CurrencyNotSupportedException;
 import com.unisono.card.currency.domain.model.CurrencyPair;
 import com.unisono.card.currency.domain.model.SupportedCurrency;
 import com.unisono.card.currency.domain.port.input.ManageCurrenciesUseCase;
+import com.unisono.card.currency.domain.port.output.CreditLimitCurrencyPort;
 import com.unisono.card.currency.domain.port.output.CurrencyRepository;
 import com.unisono.card.shared.domain.exception.NotFoundException;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.util.Currency;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Catálogo de monedas aceptadas. Implementa: ManageCurrenciesUseCase
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class CurrencyCatalogService implements ManageCurrenciesUseCase {
 
     private final CurrencyRepository currencyRepository;
+    private final CreditLimitCurrencyPort creditLimitCurrencies;
     private final Clock clock;
-    private final Currency systemCurrency;
-
-    public CurrencyCatalogService(CurrencyRepository currencyRepository, Clock clock,
-                                  @Value("${card.currency.system-currency:ARS}") String systemCurrency) {
-        this.currencyRepository = currencyRepository;
-        this.clock = clock;
-        this.systemCurrency = CurrencyPair.currency(systemCurrency);
-    }
 
     @Override
     @Transactional
@@ -57,8 +55,12 @@ public class CurrencyCatalogService implements ManageCurrenciesUseCase {
     @Override
     @Transactional
     public SupportedCurrency deactivate(String code) {
-        SupportedCurrency currency = get(code);
-        currency.deactivate(systemCurrency, clock.instant());
+        // Bloquea la fila antes de mirar los límites: una asignación concurrente en esta moneda (card-limits lee la
+        // fila con FOR SHARE) espera a esta baja o esta baja ve el límite ya confirmado
+        String normalized = CurrencyPair.currency(code).getCurrencyCode();
+        SupportedCurrency currency = currencyRepository.findByCodeForUpdate(normalized)
+                .orElseThrow(() -> new NotFoundException("Currency", normalized));
+        currency.deactivate(creditLimitCurrencies.hasCreditLimitsIn(normalized), clock.instant());
         log.info("Currency {} deactivated", currency.getCode());
         return currencyRepository.save(currency);
     }
@@ -76,23 +78,29 @@ public class CurrencyCatalogService implements ManageCurrenciesUseCase {
     }
 
     /**
-     * Verifica que la moneda del sistema ({@code card.currency.system-currency}) esté dada de alta y activa. Si no,
-     * ninguna conversión hacia la moneda de los límites funcionaría: se llama al arrancar para fallar enseguida.
+     * Loguea un WARN por cada moneda con límites de crédito que no está dada de alta o está inactiva: los pagos en
+     * otra moneda de esas tarjetas fallan con 422 hasta que se corrija el catálogo.
      *
-     * @throws IllegalStateException si la moneda no está en el catálogo o está inactiva
+     * @return las monedas con límites que no están disponibles (vacío si no hay ninguna)
      */
-    public void verifySystemCurrency() {
-        String code = systemCurrency.getCurrencyCode();
-        SupportedCurrency currency = currencyRepository.findByCode(code)
-                .orElseThrow(() -> new IllegalStateException(String.format(
-                        "System currency %s (card.currency.system-currency) is not registered in the currencies "
-                                + "table: apply migration V19 or register it", code)));
-        if (!currency.isActive()) {
-            throw new IllegalStateException(String.format(
-                    "System currency %s (card.currency.system-currency) is inactive: set active = true in the "
-                            + "currencies table", code));
+    public Set<String> warnAboutCreditLimitsInUnavailableCurrencies() {
+        Set<String> unavailable = new TreeSet<>();
+        for (String code : creditLimitCurrencies.currenciesWithCreditLimits()) {
+            Optional<SupportedCurrency> currency = currencyRepository.findByCode(code);
+            if (currency.isEmpty()) {
+                log.warn("There are credit limits in {}, which is not registered: conversions to it fail with 422. "
+                        + "Register it with POST /api/v1/currencies", code);
+                unavailable.add(code);
+            } else if (!currency.get().isActive()) {
+                log.warn("There are credit limits in {}, which is inactive: conversions to it fail with 422. "
+                        + "Activate it with PUT /api/v1/currencies/{}/activate", code, code);
+                unavailable.add(code);
+            }
         }
-        log.info("System currency {} is registered and active", code);
+        if (unavailable.isEmpty()) {
+            log.info("Every currency with credit limits is registered and active");
+        }
+        return unavailable;
     }
 
     /**

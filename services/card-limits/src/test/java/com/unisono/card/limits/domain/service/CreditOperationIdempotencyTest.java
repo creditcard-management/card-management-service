@@ -56,7 +56,7 @@ class CreditOperationIdempotencyTest {
         when(cardValidationPort.isCardActive(CARD_ID)).thenReturn(true);
         service = new CreditLimitManagementService(creditLimits, cardValidationPort, operations,
                 new CreditLimitEventEmitter((topic, key, event) -> outbox.add(Map.entry(topic, event))),
-                TestLimitPolicies.port());
+                TestLimitPolicies.port(), currency -> true);
         creditLimit = creditLimits.save(CreditLimit.assign(CARD_ID, Money.ofARS(500_000), 0.3, TestLimitPolicies.ars(), "test"));
     }
 

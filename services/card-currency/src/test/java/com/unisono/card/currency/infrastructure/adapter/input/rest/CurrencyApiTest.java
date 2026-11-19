@@ -103,7 +103,7 @@ class CurrencyApiTest {
     @Test
     void listAndDeactivate() throws Exception {
         when(currencies.list(true)).thenReturn(List.of(SupportedCurrency.register("ARS", "Peso", T0)));
-        when(currencies.deactivate("ARS")).thenThrow(new BusinessRuleException("system currency"));
+        when(currencies.deactivate("ARS")).thenThrow(new BusinessRuleException("Currency ARS cannot be deactivated: there are credit limits in it"));
 
         mvc.perform(get("/api/v1/currencies").param("activeOnly", "true"))
                 .andExpect(status().isOk())

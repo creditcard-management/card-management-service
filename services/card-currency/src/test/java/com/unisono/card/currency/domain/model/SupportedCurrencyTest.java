@@ -5,7 +5,6 @@ import com.unisono.card.shared.domain.exception.InvalidValueObjectException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
-import java.util.Currency;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -13,7 +12,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SupportedCurrencyTest {
 
     private static final Instant T0 = Instant.parse("2026-11-15T12:00:00Z");
-    private static final Currency ARS = Currency.getInstance("ARS");
 
     @Test
     void registersActiveWithIsoData() {
@@ -45,7 +43,7 @@ class SupportedCurrencyTest {
     void deactivatesAndActivatesUpdatingTimestamp() {
         SupportedCurrency usd = SupportedCurrency.register("USD", "Dólar", T0);
 
-        usd.deactivate(ARS, T0.plusSeconds(5));
+        usd.deactivate(false, T0.plusSeconds(5));
         assertThat(usd.isActive()).isFalse();
         assertThat(usd.getUpdatedAt()).isEqualTo(T0.plusSeconds(5));
 
@@ -55,10 +53,12 @@ class SupportedCurrencyTest {
     }
 
     @Test
-    void systemCurrencyCannotBeDeactivated() {
+    void aCurrencyWithCreditLimitsCannotBeDeactivated() {
         SupportedCurrency ars = SupportedCurrency.register("ARS", "Peso", T0);
 
-        assertThatThrownBy(() -> ars.deactivate(ARS, T0)).isInstanceOf(BusinessRuleException.class);
+        assertThatThrownBy(() -> ars.deactivate(true, T0))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("credit limits");
         assertThat(ars.isActive()).isTrue();
     }
 

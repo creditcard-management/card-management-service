@@ -110,7 +110,7 @@ class CurrencyPersistenceTest {
     void currencyRoundTrip() {
         SupportedCurrency brl = SupportedCurrency.register("BRL", "Real", T0);
         currencies.save(brl);
-        brl.deactivate(java.util.Currency.getInstance("ARS"), T0.plusSeconds(1));
+        brl.deactivate(false, T0.plusSeconds(1));
         currencies.save(brl);
 
         SupportedCurrency loaded = currencies.findByCode("BRL").orElseThrow();

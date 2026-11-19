@@ -56,7 +56,7 @@ public class CurrencyController {
     }
 
     @PutMapping("/{code}/deactivate")
-    @Operation(summary = "Desactivar una moneda (no se puede con la moneda del sistema)")
+    @Operation(summary = "Desactivar una moneda (no se puede si tiene límites de crédito)")
     public CurrencyResponse deactivate(@PathVariable String code) {
         return mapper.toResponse(currencies.deactivate(code));
     }

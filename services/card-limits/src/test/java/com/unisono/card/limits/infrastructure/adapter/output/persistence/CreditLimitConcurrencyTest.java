@@ -1,5 +1,6 @@
 package com.unisono.card.limits.infrastructure.adapter.output.persistence;
 
+import com.unisono.card.limits.domain.port.output.CurrencyCatalogPort;
 import com.unisono.card.limits.domain.port.output.LimitPolicyPort;
 import org.springframework.context.annotation.Bean;
 import com.unisono.card.limits.domain.model.TestLimitPolicies;
@@ -87,6 +88,11 @@ class CreditLimitConcurrencyTest {
         @Bean
         LimitPolicyPort limitPolicyPort() {
             return TestLimitPolicies.port();
+        }
+
+        @Bean
+        CurrencyCatalogPort currencyCatalogPort() {
+            return currency -> true;
         }
     }
 

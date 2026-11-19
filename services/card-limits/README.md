@@ -9,7 +9,7 @@ Microservicio dueño del aggregate `CreditLimit`: asigna y modifica los límites
 | Puerto | `8082` |
 | Base path | `/api/v1/credit-limits` |
 | Swagger UI | `http://localhost:8082/swagger-ui.html` |
-| Tablas | `credit_limits`, `credit_limit_history`, `credit_operations`, `credit_limit_outbox_events`; lee `cards` por JPA (no llama a card-data) |
+| Tablas | `credit_limits`, `credit_limit_history`, `credit_operations`, `credit_limit_outbox_events`; lee `cards` por JPA y `currencies` (catálogo de card-currency) por JDBC, sin llamar a esos servicios |
 | Kafka | Publica `credit-limit.assigned`, `.updated`, `.consumed` y `.released`. No consume |
 | Depende de | `card-shared`, `card-events` |
 
@@ -17,7 +17,7 @@ Microservicio dueño del aggregate `CreditLimit`: asigna y modifica los límites
 
 | Grupo | Endpoints |
 |---|---|
-| Asignación | `POST /` y `POST /cards/{cardId}`. La tarjeta tiene que estar `APPROVED` o `ISSUED` y sin límite previo |
+| Asignación | `POST /` y `POST /cards/{cardId}`. La tarjeta tiene que estar `APPROVED` o `ISSUED` y sin límite previo, y la moneda tener política (`card.limits.policies`) y estar activa en el catálogo de card-currency |
 | Consultas | `GET /{creditLimitId}`, `GET /card/{cardId}`, `GET /card/{cardId}/info`, `GET /{creditLimitId}/history` |
 | Modificación | `PUT /{creditLimitId}/increase-purchase-limit`, `/decrease-purchase-limit`, `/update-cash-advance-limit`, `/update-temporal-limits` |
 | Operaciones | `POST /{creditLimitId}/consume-purchase`, `/consume-cash-advance`, `/release-credit`, `/restore-credit` y `/operations/{operationId}/cancel`. Son idempotentes por `operationId` |
@@ -49,4 +49,4 @@ mvn -pl services/card-limits -am test
 | `CreditValidationServiceTest`, `CreditOperationIdempotencyTest`, `CreditLimitChangeEventsTest` | Validación, idempotencia por `operationId` y eventos |
 | `CreditLimitControllerTest` | Endpoints (MockMvc) |
 | `CreditLimitEntityMapperTest`, `CreditOperationRepositoryAdapterMappingTest`, `CreditLimitOutboxRelayTest` | Mapeos y relay del outbox |
-| `CreditLimitPersistenceTest`, `CreditLimitConcurrencyTest`, `CreditLimitOutboxPersistenceTest` | Persistencia y concurrencia contra PostgreSQL (Testcontainers, requieren Docker) |
+| `CreditLimitPersistenceTest`, `CreditLimitConcurrencyTest`, `CreditLimitOutboxPersistenceTest`, `CurrencyCatalogAdapterTest` | Persistencia y concurrencia contra PostgreSQL (Testcontainers, requieren Docker) |

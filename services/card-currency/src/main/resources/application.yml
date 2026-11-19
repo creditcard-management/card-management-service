@@ -28,7 +28,6 @@ spring:
 
 card:
   currency:
-    system-currency: ARS      # Moneda de los límites de crédito; no se puede desactivar
     history-max-size: 100     # Máximo de cotizaciones por consulta de historial
 
 server:

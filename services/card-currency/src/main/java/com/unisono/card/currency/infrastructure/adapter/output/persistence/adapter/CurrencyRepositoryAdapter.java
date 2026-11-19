@@ -27,6 +27,11 @@ public class CurrencyRepositoryAdapter implements CurrencyRepository {
     }
 
     @Override
+    public Optional<SupportedCurrency> findByCodeForUpdate(String code) {
+        return jpaRepository.findByCodeForUpdate(code).map(CurrencyRepositoryAdapter::toDomain);
+    }
+
+    @Override
     public boolean existsByCode(String code) {
         return jpaRepository.existsById(code);
     }

@@ -3,6 +3,7 @@ package com.unisono.card.currency.domain.service;
 import com.unisono.card.currency.domain.model.CurrencyPair;
 import com.unisono.card.currency.domain.model.ExchangeRate;
 import com.unisono.card.currency.domain.model.SupportedCurrency;
+import com.unisono.card.currency.domain.port.output.CreditLimitCurrencyPort;
 import com.unisono.card.currency.domain.port.output.CurrencyRepository;
 import com.unisono.card.currency.domain.port.output.ExchangeRateRepository;
 
@@ -13,6 +14,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Fakes en memoria de los repositorios para testear los servicios sin JPA.
@@ -37,6 +40,11 @@ final class InMemoryRepositories {
         }
 
         @Override
+        public Optional<SupportedCurrency> findByCodeForUpdate(String code) {
+            return findByCode(code);
+        }
+
+        @Override
         public boolean existsByCode(String code) {
             return byCode.containsKey(code);
         }
@@ -47,6 +55,21 @@ final class InMemoryRepositories {
                     .filter(c -> !activeOnly || c.isActive())
                     .sorted(Comparator.comparing(SupportedCurrency::getCode))
                     .toList();
+        }
+    }
+
+    /** Monedas de los límites de crédito de card-limits: las que el test agrega */
+    static final class CreditLimitCurrencies implements CreditLimitCurrencyPort {
+        final Set<String> codes = new TreeSet<>();
+
+        @Override
+        public boolean hasCreditLimitsIn(String currencyCode) {
+            return codes.contains(currencyCode);
+        }
+
+        @Override
+        public Set<String> currenciesWithCreditLimits() {
+            return Set.copyOf(codes);
         }
     }
 

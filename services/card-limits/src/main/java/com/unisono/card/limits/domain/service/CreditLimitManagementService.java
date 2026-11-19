@@ -3,11 +3,13 @@ package com.unisono.card.limits.domain.service;
 import com.unisono.card.limits.domain.model.CreditLimit;
 import com.unisono.card.limits.domain.model.CreditLimitHistory;
 import com.unisono.card.limits.domain.model.CreditOperation;
+import com.unisono.card.limits.domain.model.LimitPolicy;
 import com.unisono.card.limits.domain.exception.CreditOperationCancelledException;
 import com.unisono.card.limits.domain.port.input.*;
 import com.unisono.card.limits.domain.port.output.CardValidationPort;
 import com.unisono.card.limits.domain.port.output.CreditLimitRepository;
 import com.unisono.card.limits.domain.port.output.CreditOperationRepository;
+import com.unisono.card.limits.domain.port.output.CurrencyCatalogPort;
 import com.unisono.card.limits.domain.port.output.LimitPolicyPort;
 import com.unisono.card.limits.domain.service.CreditLimitEventEmitter.Movement;
 import com.unisono.card.shared.domain.exception.BusinessRuleException;
@@ -47,6 +49,7 @@ public class CreditLimitManagementService implements
     private final CreditOperationRepository creditOperationRepository;
     private final CreditLimitEventEmitter eventEmitter;
     private final LimitPolicyPort limitPolicyPort;
+    private final CurrencyCatalogPort currencyCatalogPort;
 
     // ========================================
     // AssignCreditLimitUseCase
@@ -66,12 +69,21 @@ public class CreditLimitManagementService implements
             );
         }
 
-        // Crear el límite de crédito con los rangos y defaults de su moneda (422 si la moneda no tiene política)
+        // La moneda necesita política de límites (422 si no) y estar activa en el catálogo de card-currency
+        String currency = command.purchaseLimitAmount().getCurrencyCode();
+        LimitPolicy policy = limitPolicyPort.forCurrency(currency);
+        if (!currencyCatalogPort.isActive(currency)) {
+            throw new BusinessRuleException(String.format(
+                    "No se pueden asignar límites en %s: la moneda no está dada de alta o está inactiva en el "
+                            + "catálogo de monedas (card-currency)", currency));
+        }
+
+        // Crear el límite de crédito con los rangos y defaults de su moneda
         CreditLimit creditLimit = CreditLimit.assign(
                 command.cardId(),
                 command.purchaseLimitAmount(),
                 command.cashAdvancePercentage(),
-                limitPolicyPort.forCurrency(command.purchaseLimitAmount().getCurrencyCode()),
+                policy,
                 command.assignedBy()
         );
 

@@ -15,7 +15,7 @@ Microservicio dueño de las monedas que acepta el sistema y de sus cotizaciones.
 
 ## Modelo
 
-- **Moneda** (`SupportedCurrency`): código ISO 4217, nombre y estado. Solo las activas se cotizan y convierten. Solo se aceptan monedas de 2 decimales (los montos del sistema usan siempre 2). La moneda del sistema (`card.currency.system-currency`, por defecto `ARS`, la de los límites de crédito) no se puede desactivar; si al arrancar no está dada de alta o está inactiva, el servicio no arranca. La migración carga ARS, USD y EUR, sin cotizaciones; en desarrollo, `make seed-dev` de `card-management-database` carga USD/ARS y EUR/ARS.
+- **Moneda** (`SupportedCurrency`): código ISO 4217, nombre y estado. Solo las activas se cotizan y convierten. Solo se aceptan monedas de 2 decimales (los montos del sistema usan siempre 2). Una moneda con límites de crédito (lee `credit_limits` de card-limits) no se puede desactivar; al arrancar se loguea un `WARN` si hay límites en una moneda no dada de alta o inactiva. La migración carga ARS, USD y EUR, sin cotizaciones; en desarrollo, `make seed-dev` de `card-management-database` carga USD/ARS y EUR/ARS.
 - **Cotización** (`ExchangeRate`): `1 base = rate quote`, con hasta 8 decimales y vigencia `[validFrom, validTo)`. Hay una sola cotización abierta (`validTo` nulo) por par: publicar una nueva cierra la anterior en el instante en que empieza la nueva. Cada par se cotiza en un solo sentido (si existe USD/ARS, publicar ARS/USD da 422). Las publicaciones y cancelaciones de un par (en cualquier sentido) se serializan con un lock de Postgres. Una cotización programada que todavía no empezó se puede cancelar; una vigente solo se reemplaza.
 - **Conversión**: usa la cotización directa del par y, si no hay, la inversa (dividiendo). El resultado se redondea a 2 decimales HALF_UP, como todo `Money`.
 
@@ -25,7 +25,7 @@ Microservicio dueño de las monedas que acepta el sistema y de sus cotizaciones.
 |---|---|
 | `POST /currencies` | Alta de una moneda (`{code, name}`), queda activa. 409 si ya existe, 422 si no tiene 2 decimales (JPY, BHD…) |
 | `GET /currencies` (`?activeOnly=true`), `GET /currencies/{code}` | Consultas |
-| `PUT /currencies/{code}/activate` · `/deactivate` | Cambia el estado. 422 si es la moneda del sistema |
+| `PUT /currencies/{code}/activate` · `/deactivate` | Cambia el estado. 422 al desactivar una moneda con límites de crédito |
 | `POST /exchange-rates` | Publica `{baseCurrency, quoteCurrency, rate, effectiveFrom?}`. Sin `effectiveFrom` rige desde ahora; no acepta fechas pasadas ni el par inverso de uno ya cotizado (422) |
 | `DELETE /exchange-rates/{rateId}` | Cancela una cotización programada (204); la anterior del par sigue vigente. 422 si ya empezó, 404 si no existe |
 | `GET /exchange-rates/{base}/{quote}` (`?at=`) | Cotización vigente del par, sin invertir. 404 si no hay, 422 si alguna moneda está inactiva |
@@ -60,7 +60,7 @@ mvn -pl services/card-currency -am test
 
 | Tests | Cubren |
 |---|---|
-| `CurrencyPairTest`, `ExchangeRateTest`, `SupportedCurrencyTest` | Value objects y aggregate: códigos, vigencias, cierre de cotizaciones y moneda del sistema |
+| `CurrencyPairTest`, `ExchangeRateTest`, `SupportedCurrencyTest` | Value objects y aggregate: códigos, vigencias, cierre de cotizaciones y baja de monedas con límites de crédito |
 | `CurrencyServicesTest` | Catálogo, publicación (futuras, retroactivas, monedas inactivas, par inverso), cancelación de programadas, historial y conversión directa, inversa y en un instante |
 | `CurrencyApiTest` | Endpoints, validación y mapeo de errores (MockMvc) |
 | `CurrencyPersistenceTest` | Mapeo contra el schema de V19, vigencias, índice de cotización abierta por par y cancelación (Testcontainers, requiere Docker) |
