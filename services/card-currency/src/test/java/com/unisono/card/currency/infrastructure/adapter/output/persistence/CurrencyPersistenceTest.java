@@ -110,7 +110,7 @@ class CurrencyPersistenceTest {
     void currencyRoundTrip() {
         SupportedCurrency brl = SupportedCurrency.register("BRL", "Real", T0);
         currencies.save(brl);
-        brl.deactivate(java.util.Currency.getInstance("ARS"), T0.plusSeconds(1));
+        brl.deactivate(false, T0.plusSeconds(1));
         currencies.save(brl);
 
         SupportedCurrency loaded = currencies.findByCode("BRL").orElseThrow();
@@ -147,6 +147,27 @@ class CurrencyPersistenceTest {
         assertThat(history).extracting(ExchangeRate::getRateId)
                 .containsExactly(second.getRateId(), first.getRateId());
         assertThat(rates.findHistory(USD_ARS, 1)).hasSize(1);
+    }
+
+    @Test
+    void findAllValidAtReturnsTheCurrentRateOfEachPair() {
+        CurrencyPair eurArs = CurrencyPair.of("EUR", "ARS");
+        ExchangeRate first = rates.save(rate("1000", T0));
+        ExchangeRate second = rate("1100", T0.plusSeconds(3600));
+        tx.executeWithoutResult(status -> {
+            ExchangeRate open = rates.findOpenForUpdate(USD_ARS).orElseThrow();
+            open.supersededBy(second);
+            rates.save(open);
+            rates.save(second);
+        });
+        ExchangeRate eur = rates.save(ExchangeRate.publish(eurArs, new BigDecimal("1200"), T0, RateSource.MANUAL, T0));
+        rates.save(ExchangeRate.publish(CurrencyPair.of("EUR", "USD"), new BigDecimal("1.08"), T0.plusSeconds(7200),
+                RateSource.MANUAL, T0)); // programada: todavía no rige
+
+        assertThat(rates.findAllValidAt(T0)).extracting(ExchangeRate::getRateId)
+                .containsExactly(eur.getRateId(), first.getRateId());
+        assertThat(rates.findAllValidAt(T0.plusSeconds(3600))).extracting(ExchangeRate::getRateId)
+                .containsExactly(eur.getRateId(), second.getRateId());
     }
 
     @Test

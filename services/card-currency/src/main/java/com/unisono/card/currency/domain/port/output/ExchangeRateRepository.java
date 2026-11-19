@@ -41,6 +41,11 @@ public interface ExchangeRateRepository {
     Optional<ExchangeRate> findValidAt(CurrencyPair pair, Instant at);
 
     /**
+     * Las cotizaciones de todos los pares vigentes en {@code at} (una por par).
+     */
+    List<ExchangeRate> findAllValidAt(Instant at);
+
+    /**
      * Historial del par, de la más nueva a la más vieja.
      */
     List<ExchangeRate> findHistory(CurrencyPair pair, int limit);

@@ -28,8 +28,11 @@ spring:
 
 card:
   currency:
-    system-currency: ARS      # Moneda de los límites de crédito; no se puede desactivar
     history-max-size: 100     # Máximo de cotizaciones por consulta de historial
+    rates:
+      max-age: PT24H                          # Una cotización vigente hace más que esto se alerta como desactualizada
+      freshness-check-interval-ms: 300000     # Cada cuánto se recalcula (ExchangeRateFreshnessMonitor)
+      freshness-check-initial-delay-ms: 15000
 
 server:
   port: 8086
@@ -38,7 +41,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always

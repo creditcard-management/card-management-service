@@ -8,7 +8,7 @@
 | Clase principal | `com.unisono.card.limits.CardLimitsApplication` |
 | Puerto | `8082` |
 | Base path REST | `/api/v1/credit-limits` |
-| Base de datos | PostgreSQL `card_management_db` — tablas propias `credit_limits`, `credit_limit_history`, `credit_operations` y `credit_limit_outbox_events`; lee `cards` |
+| Base de datos | PostgreSQL `card_management_db` — tablas propias `credit_limits`, `credit_limit_history`, `credit_operations` y `credit_limit_outbox_events`; lee `cards` y `currencies` |
 | Mensajería | Kafka, solo como productor: publica `credit-limit.assigned`, `.updated`, `.consumed` y `.released` con un transactional outbox (§6.5). No consume |
 | Dependencias internas | `card-shared` (`Money`, `CardId`, `CardStatus`, excepciones) y `card-events` (contratos `credit-limit.*`, `KafkaTopics`) |
 | Swagger UI | `http://localhost:8082/swagger-ui.html` |
@@ -183,13 +183,19 @@ Lo que el cliente paga o le devuelven de más no se pierde: queda como saldo a f
 - **Nunca convive con deuda.** Internamente cada movimiento suma o resta a la posición neta (`consumido − saldo`, `getNetDebt()`): si queda positiva es lo consumido; si queda negativa, el saldo a favor.
 - **No hay devolución del saldo al cliente** (transferencia o reintegro): solo se consume con compras y adelantos.
 
-### 3.6 Elegibilidad de la tarjeta
+### 3.6 Elegibilidad de la tarjeta y de la moneda
 
 Antes de asignar, el servicio consulta `cards` (lectura directa por JPA):
 
 - La tarjeta debe existir → si no, **404**.
 - Debe estar en `APPROVED` o `ISSUED` y no estar eliminada → si no, **422** (`"La tarjeta no puede recibir límite de crédito en su estado actual"`).
 - No puede tener ya un límite activo → **422** (`"La tarjeta ya tiene un límite de crédito asignado"`).
+
+Y la moneda del límite:
+
+- Tiene que tener política de límites (§3.2.1) → si no, **422**.
+- Tiene que estar dada de alta y activa en el catálogo de card-currency (tabla `currencies`) → si no, **422** (`"No se pueden asignar límites en USD: la moneda no está dada de alta o está inactiva en el catálogo de monedas (card-currency)"`). Los pagos en otra moneda de la tarjeta convierten hacia ella ([CURRENCY.md §3.1](CURRENCY.md)).
+- La fila de la moneda se lee con `FOR SHARE` y queda bloqueada hasta que se confirma la asignación: card-currency no puede desactivarla en el medio, y una vez asignado el límite ya no la deja desactivar.
 
 Consumir y validar exigen que la tarjeta esté `ACTIVE` y no eliminada (§4.4 y §4.5). Restaurar, liberar y cancelar no miran el estado: los reversos, devoluciones y pagos de una tarjeta bloqueada tienen que poder aplicarse.
 
@@ -219,7 +225,7 @@ Base: `/api/v1/credit-limits`. Bodies validados con Bean Validation.
 |---|---|
 | `cardId` | Obligatorio |
 | `purchaseLimitAmount` | Obligatorio, > 0 y dentro del rango de la política de la moneda (ARS: 2.500.000 a 25.000.000); fuera de rango, 400 |
-| `currency` | Obligatorio, 3 letras. Tiene que tener política configurada (§3.2.1); si no, 422 |
+| `currency` | Obligatorio, 3 letras. Tiene que tener política configurada (§3.2.1) y estar dada de alta y activa en el catálogo de card-currency (§3.6); si no, 422 |
 | `cashAdvancePercentage` | Opcional, entre 0 y 1, por defecto 0,30 (un `null` explícito también). **`0` = sin adelantos.** Si es mayor a 0, el tope resultante debe entrar en el rango de adelantos de la política. Con el valor por defecto siempre entra (§3.2.1); con uno explícito que no entra, 400 con el porcentaje mínimo o máximo que sirve para ese límite (por ejemplo, `"El 0.01% de ARS 2500000.00 da un tope de adelantos de ARS 250.00, menor al mínimo de ARS 500.00. Usar al menos el 0.02% o cero para no habilitar adelantos"`) |
 | `dailyLimitAmount`, `monthlyLimitAmount` | Opcionales, > 0; si no se envían quedan los de la política (ARS: 1.250.000 y 1.250.000). El diario final no puede superar al mensual final (422) |
 | `assignedBy` | Obligatorio |
@@ -460,6 +466,8 @@ No hay jobs programados. Al leer o consumir, `DailyLimit` y `MonthlyLimit` compa
 
 `CardJpaEntity` mapea solo `id`, `status` y `deleted` de la tabla de `card-data`, para validar si la tarjeta puede recibir un límite.
 
+**Lectura de `currencies`.** `CurrencyCatalogAdapter` (con `JdbcTemplate`) lee `currencies.active` de card-currency al asignar, con `FOR SHARE` dentro de la transacción de la asignación (§3.6).
+
 ### 6.4 `credit_operations`
 
 Todos los movimientos de crédito (V12; `RELEASE` desde V17), uno por `operationId`:
@@ -540,6 +548,7 @@ docker compose -f deploy/docker/docker-compose.yml up -d card-limits-service
 | Módulo | Relación | Estado |
 |---|---|---|
 | `card-data` | `card-limits` lee `cards.status` y `cards.deleted` | Funciona (acoplamiento por base compartida) |
+| `card-currency` | card-limits lee `currencies` para asignar solo en monedas activas; card-currency lee `credit_limits` para no desactivar una moneda con límites ([CURRENCY.md §3.1](CURRENCY.md)) | Funciona (acoplamiento por base compartida) |
 | `card-lifecycle` | Lee `credit_limits` por `card_id` para decidir si se puede activar | La regla existe pero el endpoint de activación no la usa ([LIFECYCLE.md §9](LIFECYCLE.md)); además esa consulta no filtra `deleted` |
 | `payment-processing` | Valida (`validate/*`), consume al aprobar (`consume-*`) y restaura en reversos y devoluciones (`restore-credit`) por REST, siempre con `operationId`. Cancela las operaciones cuyo pago no confirmó (`operations/{id}/cancel`) | Funciona ([PAYMENT.md §4.7 y §7](PAYMENT.md)) |
 | `card-events` | Contratos `credit-limit.*` y `KafkaTopics` ([EVENTS.md §4.10](EVENTS.md)) | Se publican por el outbox (§6.5); todavía sin consumidores |

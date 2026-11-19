@@ -70,11 +70,15 @@ public class SupportedCurrency {
     }
 
     /**
-     * Desactiva la moneda. La moneda del sistema (en la que están los límites) no se puede desactivar.
+     * Desactiva la moneda. Una moneda con límites de crédito no se puede desactivar: los pagos en otra moneda de
+     * esas tarjetas necesitan convertir hacia ella.
+     *
+     * @param hasCreditLimits si hay límites de crédito (no eliminados) en esta moneda
      */
-    public void deactivate(Currency systemCurrency, Instant now) {
-        if (currency.equals(systemCurrency)) {
-            throw new BusinessRuleException("The system currency " + getCode() + " cannot be deactivated");
+    public void deactivate(boolean hasCreditLimits, Instant now) {
+        if (hasCreditLimits) {
+            throw new BusinessRuleException(String.format(
+                    "Currency %s cannot be deactivated: there are credit limits in it", getCode()));
         }
         if (active) {
             active = false;

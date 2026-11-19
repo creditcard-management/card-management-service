@@ -3070,7 +3070,7 @@
     },
     {
       "name": "5. card-currency",
-      "description": "Endpoints de card-currency (8086): catálogo de monedas, cotizaciones por par con vigencia y conversión. La moneda del sistema (ARS, la de los límites) no se puede desactivar. Una cotización `1 base = rate quote` rige desde `effectiveFrom` (ahora si se omite) hasta que se publica la siguiente del par; no se aceptan fechas pasadas. La conversión usa la cotización directa del par y, si no hay, la inversa.",
+      "description": "Endpoints de card-currency (8086): catálogo de monedas, cotizaciones por par con vigencia y conversión. Una moneda con límites de crédito (ARS en los datos de desarrollo) no se puede desactivar. Una cotización `1 base = rate quote` rige desde `effectiveFrom` (ahora si se omite) hasta que se publica la siguiente del par; no se aceptan fechas pasadas. La conversión usa la cotización directa del par y, si no hay, la inversa.",
       "item": [
         {
           "name": "Listar monedas activas",
@@ -3295,7 +3295,7 @@
           ]
         },
         {
-          "name": "Desactivar la moneda del sistema → 422",
+          "name": "Desactivar una moneda con límites de crédito (ARS) → 422",
           "request": {
             "method": "PUT",
             "header": [],

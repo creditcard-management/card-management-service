@@ -115,6 +115,11 @@ public class ExchangeRateRepositoryAdapter implements ExchangeRateRepository {
     }
 
     @Override
+    public List<ExchangeRate> findAllValidAt(Instant at) {
+        return jpaRepository.findAllValidAt(at).stream().map(ExchangeRateRepositoryAdapter::toDomain).toList();
+    }
+
+    @Override
     public List<ExchangeRate> findHistory(CurrencyPair pair, int limit) {
         return jpaRepository.findByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc(
                         pair.baseCode(), pair.quoteCode(), PageRequest.of(0, limit))

@@ -6,6 +6,7 @@ import lombok.Getter;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -117,5 +118,12 @@ public class ExchangeRate {
 
     public boolean isValidAt(Instant instant) {
         return !instant.isBefore(validFrom) && (validTo == null || instant.isBefore(validTo));
+    }
+
+    /**
+     * Cuánto hace que rige: desde {@code validFrom} hasta {@code now} (cero si todavía no empezó)
+     */
+    public Duration ageAt(Instant now) {
+        return now.isBefore(validFrom) ? Duration.ZERO : Duration.between(validFrom, now);
     }
 }
