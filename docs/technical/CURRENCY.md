@@ -9,7 +9,7 @@
 | Puerto | `8086` |
 | Base paths REST | `/api/v1/currencies`, `/api/v1/exchange-rates` |
 | Base de datos | PostgreSQL `card_management_db` — tablas propias `currencies` y `exchange_rates` (migración V19); lee `credit_limits` (§3.1) |
-| Mensajería | Ninguna: no publica ni consume (no tiene dependencias de Kafka ni de `card-events`, §9) |
+| Mensajería | Ninguna: no publica ni consume (no tiene dependencias de Kafka ni de `card-events`, §8) |
 | Dependencias internas | `card-shared` (`Money`, excepciones `NotFoundException`, `ValidationException`, `InvalidValueObjectException`, `BusinessRuleException`) |
 | Swagger UI | `http://localhost:8086/swagger-ui.html` (OpenAPI en `/api-docs`) |
 
@@ -214,6 +214,8 @@ Si el par tenía una cotización abierta, queda con `validTo = effectiveFrom` de
 
 - Si la abierta empieza en el mismo instante o después que la nueva (por ejemplo, una futura ya programada; se puede cancelar antes con §4.3).
 - Si el **par inverso ya está cotizado** (`"ARS/USD is already quoted as USD/ARS: publish USD/ARS instead"`). Cada par se cotiza en un solo sentido, así dos tasas independientes no pueden contradecirse; la conversión en el otro sentido usa la inversa. La regla mira solo el sentido contrario: si por datos previos un par ya tiene los dos sentidos, el que tiene cotización abierta se sigue pudiendo publicar.
+
+**Corrección de una cotización mal cargada.** Una cotización que ya empezó no se modifica ni se borra: se publica la correcta, que la reemplaza desde ahora. Es a propósito: cambiarla alteraría conversiones ya hechas, que guardan su `rateId` en la transacción de payment-processing. Lo convertido con la tasa errónea se ajusta con devoluciones o reversos de esos pagos. Una cotización programada (que todavía no empezó) sí se puede cancelar (§4.3).
 
 ### 4.3 Cancelación de una cotización programada
 
@@ -532,7 +534,7 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 | `payment-processing` | Llama a `POST /exchange-rates/convert` cuando la moneda del pago difiere de la del límite; guarda `appliedRate` y `rateId` en la transacción | Funciona ([PAYMENT.md §4 y §7](PAYMENT.md)) |
 | `card-limits` | card-currency lee `credit_limits` para no desactivar monedas con límites; card-limits lee `currencies` para asignar solo en monedas activas (§3.1) | Funciona (acoplamiento por base compartida) |
 | `card-shared` | `Money` (escala 2), excepciones base | Funciona |
-| `card-events` | Sin relación: no hay contratos `exchange-rate.*` (§9) | Pendiente |
+| `card-events` | Sin relación: no hay contratos `exchange-rate.*`. Ningún módulo necesita enterarse de una cotización o una baja de moneda; si aparece un consumidor, se publicarían (`exchange-rate.published` / `.cancelled`, `currency.deactivated`) con un transactional outbox como el de card-limits | No aplica (sin consumidores) |
 | `card-data`, `card-lifecycle` | Ninguna | — |
 
 ---
@@ -542,14 +544,12 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 ### 9.1 Funcionales
 
 1. **Las cotizaciones no vencen.** Una cotización abierta sigue vigente indefinidamente; no hay control de antigüedad ni alerta si no se actualiza. Solo hay carga manual (`RateSource.MANUAL`), sin proveedor externo ni job de actualización.
-2. **Corrección solo hacia adelante.** Una cotización vigente mal cargada no se puede corregir ni borrar, solo reemplazar desde ahora (a propósito: cambiarla alteraría conversiones ya hechas). Solo las programadas se pueden cancelar (§5.3).
-3. **Sin triangulación.** Solo par directo o inverso; `USD → EUR` exige cargar `USD/EUR` o `EUR/USD` aunque existan `USD/ARS` y `EUR/ARS`.
-4. **Solo monedas de 2 decimales.** `Money` redondea todo a 2, así que el alta rechaza JPY, CLP, BHD, KWD y similares (§3.1). Soportarlas requiere que `Money` respete los decimales de cada moneda, lo que toca `card-shared` y las columnas `numeric(15,2)` de todos los servicios.
-5. **`appliedRate` de las inversas es aproximada.** El monto se calcula dividiendo por la tasa original, pero `appliedRate` es `1 ÷ rate` redondeada a 8 decimales: `sourceAmount × appliedRate` puede diferir en centavos de `targetAmount` para montos grandes. Lo que queda en la transacción de `payment-processing` es esa tasa redondeada.
+2. **Sin triangulación.** Solo par directo o inverso; `USD → EUR` exige cargar `USD/EUR` o `EUR/USD` aunque existan `USD/ARS` y `EUR/ARS`.
+3. **Solo monedas de 2 decimales.** `Money` redondea todo a 2, así que el alta rechaza JPY, CLP, BHD, KWD y similares (§3.1). Soportarlas requiere que `Money` respete los decimales de cada moneda, lo que toca `card-shared` y las columnas `numeric(15,2)` de todos los servicios.
+4. **`appliedRate` de las inversas es aproximada.** El monto se calcula dividiendo por la tasa original, pero `appliedRate` es `1 ÷ rate` redondeada a 8 decimales: `sourceAmount × appliedRate` puede diferir en centavos de `targetAmount` para montos grandes. Lo que queda en la transacción de `payment-processing` es esa tasa redondeada.
 
 ### 9.2 Técnicas
 
-6. **Sin seguridad.** Cualquiera con acceso de red puede publicar o cancelar cotizaciones y desactivar monedas; no hay autenticación, roles ni registro de quién publicó (`createdBy`).
-7. **Sin eventos.** Publicar o cancelar una cotización o cambiar el estado de una moneda no emite nada a Kafka. Publicarlos (`exchange-rate.published` / `.cancelled`, `currency.deactivated`) necesita un transactional outbox como el de card-limits (migración, relay y limpieza); conviene hacerlo cuando haya un consumidor. El módulo ya no declara `card-events` ni `spring-kafka`.
-8. **Dependencia síncrona sin caché.** Cada pago en moneda extranjera hace una llamada REST; si card-currency no responde, el pago falla con 503 (el `RestTemplate` de payment-processing corta a los 5 s de conexión y 10 s de lectura). No hay caché local ni *circuit breaker* de esta integración: una caché de cotizaciones podría cobrar con una tasa reemplazada.
-9. **DDL de tests copiado a mano.** `src/test/resources/currency-schema.sql` es una copia manual de V19 (§6.4): si la migración cambia y la copia no, los tests de persistencia validan contra un esquema viejo. Se podría usar la imagen de Flyway de `card-management-database` con Testcontainers, pero hoy no se publica en ningún registry.
+5. **Sin seguridad.** Cualquiera con acceso de red puede publicar o cancelar cotizaciones y desactivar monedas; no hay autenticación, roles ni registro de quién publicó (`createdBy`).
+6. **Dependencia síncrona sin caché.** Cada pago en moneda extranjera hace una llamada REST; si card-currency no responde, el pago falla con 503 (el `RestTemplate` de payment-processing corta a los 5 s de conexión y 10 s de lectura). No hay caché local ni *circuit breaker* de esta integración: una caché de cotizaciones podría cobrar con una tasa reemplazada.
+7. **DDL de tests copiado a mano.** `src/test/resources/currency-schema.sql` es una copia manual de V19 (§6.4): si la migración cambia y la copia no, los tests de persistencia validan contra un esquema viejo. Se podría usar la imagen de Flyway de `card-management-database` con Testcontainers, pero hoy no se publica en ningún registry.
