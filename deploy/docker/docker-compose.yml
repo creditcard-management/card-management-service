@@ -116,7 +116,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 180s  # arrancando los 5 a la vez (CPU compartida) cada JVM tarda ~2 min
     restart: unless-stopped
 
   card-limits-service:
@@ -145,7 +145,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 180s  # arrancando los 5 a la vez (CPU compartida) cada JVM tarda ~2 min
     restart: unless-stopped
 
   card-lifecycle-service:
@@ -178,7 +178,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 180s  # arrancando los 5 a la vez (CPU compartida) cada JVM tarda ~2 min
     restart: unless-stopped
 
   payment-processing:
@@ -211,7 +211,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 180s  # arrancando los 5 a la vez (CPU compartida) cada JVM tarda ~2 min
     restart: unless-stopped
 
   card-currency-service:
@@ -234,7 +234,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 180s  # arrancando los 5 a la vez (CPU compartida) cada JVM tarda ~2 min
     restart: unless-stopped
 
 # =============================================================================
