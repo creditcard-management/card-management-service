@@ -117,6 +117,11 @@ final class InMemoryRepositories {
         }
 
         @Override
+        public List<ExchangeRate> findAllValidAt(Instant at) {
+            return rates.stream().filter(r -> r.isValidAt(at)).toList();
+        }
+
+        @Override
         public List<ExchangeRate> findHistory(CurrencyPair pair, int limit) {
             return rates.stream()
                     .filter(r -> r.getPair().equals(pair))

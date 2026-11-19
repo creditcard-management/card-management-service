@@ -1,0 +1,30 @@
+# Reglas de alerta de Prometheus para card-currency (antigüedad de las cotizaciones).
+# Las métricas salen de /actuator/prometheus (ExchangeRateFreshnessMonitor). Cargar con:
+#   rule_files:
+#     - card-currency-alerts.yml
+# No hay Prometheus en el docker-compose del repo: este archivo es la referencia para el entorno que lo tenga.
+groups:
+  - name: card-currency-exchange-rates
+    rules:
+      - alert: ExchangeRateStale
+        # Una cotización vigente hace más de card.currency.rates.max-age: los pagos en esa moneda se siguen
+        # convirtiendo con ella. El umbral está en la aplicación, no acá
+        expr: max by (instance) (card_currency_exchange_rates_stale) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "card-currency: {{ $value }} cotización(es) desactualizada(s)"
+          description: >-
+            Hay pares cuya cotización vigente supera la antigüedad máxima. Las conversiones la siguen usando.
+            Ver cuáles con card_currency_exchange_rate_age_seconds > card_currency_exchange_rates_max_age_seconds
+            o en el log ("Exchange rate ... is stale") y publicar la nueva con POST /api/v1/exchange-rates.
+
+      - alert: ExchangeRateFreshnessCheckFailing
+        # El control no corre (por ejemplo, la base no responde): ExchangeRateStale no se dispararía
+        expr: sum by (instance) (increase(card_currency_exchange_rates_freshness_check_failures_total[30m])) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "card-currency: el control de antigüedad de cotizaciones está fallando"
+          description: "Más de 3 corridas fallidas en 30 min. Buscar en el log \"Could not check the age of the exchange rates\"."

@@ -16,7 +16,7 @@ Microservicio dueño de las monedas que acepta el sistema y de sus cotizaciones.
 ## Modelo
 
 - **Moneda** (`SupportedCurrency`): código ISO 4217, nombre y estado. Solo las activas se cotizan y convierten. Solo se aceptan monedas de 2 decimales (los montos del sistema usan siempre 2). Una moneda con límites de crédito (lee `credit_limits` de card-limits) no se puede desactivar; al arrancar se loguea un `WARN` si hay límites en una moneda no dada de alta o inactiva. La migración carga ARS, USD y EUR, sin cotizaciones; en desarrollo, `make seed-dev` de `card-management-database` carga USD/ARS y EUR/ARS.
-- **Cotización** (`ExchangeRate`): `1 base = rate quote`, con hasta 8 decimales y vigencia `[validFrom, validTo)`. Hay una sola cotización abierta (`validTo` nulo) por par: publicar una nueva cierra la anterior en el instante en que empieza la nueva. Cada par se cotiza en un solo sentido (si existe USD/ARS, publicar ARS/USD da 422). Las publicaciones y cancelaciones de un par (en cualquier sentido) se serializan con un lock de Postgres. Una cotización programada que todavía no empezó se puede cancelar; una vigente solo se reemplaza.
+- **Cotización** (`ExchangeRate`): `1 base = rate quote`, con hasta 8 decimales y vigencia `[validFrom, validTo)`. Hay una sola cotización abierta (`validTo` nulo) por par: publicar una nueva cierra la anterior en el instante en que empieza la nueva. Cada par se cotiza en un solo sentido (si existe USD/ARS, publicar ARS/USD da 422). Las publicaciones y cancelaciones de un par (en cualquier sentido) se serializan con un lock de Postgres. Una cotización programada que todavía no empezó se puede cancelar; una vigente solo se reemplaza. Una vigente no vence: si rige hace más de `card.currency.rates.max-age` (24 h) se alerta como desactualizada (`card_currency_exchange_rates_stale` en `/actuator/prometheus`, un `WARN` en el log y la regla `ExchangeRateStale` de `deploy/prometheus/card-currency-alerts.yml`), pero se sigue usando.
 - **Conversión**: usa la cotización directa del par y, si no hay, la inversa (dividiendo). El resultado se redondea a 2 decimales HALF_UP, como todo `Money`.
 
 ## API
@@ -64,5 +64,7 @@ mvn -pl services/card-currency -am test
 | `CurrencyServicesTest` | Catálogo, publicación (futuras, retroactivas, monedas inactivas, par inverso), cancelación de programadas, historial y conversión directa, inversa y en un instante |
 | `CurrencyApiTest` | Endpoints, validación y mapeo de errores (MockMvc) |
 | `CurrencyPersistenceTest` | Mapeo contra el schema de V19, vigencias, índice de cotización abierta por par y cancelación (Testcontainers, requiere Docker) |
+| `CreditLimitCurrencyAdapterTest` | Monedas con límites de crédito y el bloqueo de una baja frente a una asignación (Testcontainers, requiere Docker) |
+| `ExchangeRateFreshnessServiceTest`, `ExchangeRateFreshnessMonitorTest` | Antigüedad de las cotizaciones vigentes y sus métricas de Prometheus |
 
 `src/test/resources/currency-schema.sql` es una copia del DDL de V19: si cambia la migración, hay que actualizarla.

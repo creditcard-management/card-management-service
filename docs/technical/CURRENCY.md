@@ -116,7 +116,7 @@ Cotización de un par con vigencia semiabierta `[validFrom, validTo)`.
 | `pair` | `CurrencyPair` | Par base/quote |
 | `rate` | `BigDecimal` | Unidades de `quote` por 1 unidad de `base`. Escala **8** (`RATE_SCALE`), `HALF_UP` |
 | `validFrom` | `Instant` | Inicio de vigencia (inclusive) |
-| `validTo` | `Instant` | Fin de vigencia (exclusive). `null` = **abierta**: vigente hasta que se publique la siguiente |
+| `validTo` | `Instant` | Fin de vigencia (exclusive). `null` = **abierta**: vigente hasta que se publique la siguiente. No vence: si supera `card.currency.rates.max-age` se alerta como desactualizada (§7.3), pero se sigue usando |
 | `source` | `RateSource` | Origen. Hoy solo `MANUAL` (carga por API) |
 | `createdAt` | `Instant` | Momento de la publicación |
 
@@ -134,6 +134,7 @@ Cotización de un par con vigencia semiabierta `[validFrom, validTo)`.
 | `ensureCancellable(now)` | `validFrom` posterior a `now` (si no, `BusinessRuleException` → 422) | — : solo valida que la cotización esté programada |
 | `resumeAfter(cancelled)` | Mismo par; esta termina justo donde empieza `cancelled` (si no, 422) | Toma el `validTo` de la cancelada: si la cancelada era la abierta, esta vuelve a quedar abierta |
 | `isOpen()` / `isValidAt(instant)` | — | `validTo == null` / `validFrom ≤ instant < validTo` |
+| `ageAt(now)` | — | Cuánto hace que rige (`now − validFrom`; cero si todavía no empezó) |
 
 ### 3.3 Value Objects
 
@@ -469,10 +470,13 @@ La base **no impide** superposiciones entre cotizaciones cerradas del mismo par 
 | `spring.jpa.properties.hibernate.jdbc.time_zone` | `UTC` |
 | `spring.flyway.enabled` | `false` |
 | `card.currency.history-max-size` | `100` — tope de `limit` en el historial (mínimo efectivo 1) |
-| `management.endpoints.web.exposure.include` | `health,info,metrics` |
+| `card.currency.rates.max-age` | `PT24H` — antigüedad a partir de la cual una cotización vigente se alerta como desactualizada (§7.3) |
+| `card.currency.rates.freshness-check-interval-ms` / `-initial-delay-ms` | `300000` / `15000` — cada cuánto se recalcula la antigüedad |
+| `card.currency.scheduling.enabled` | `true` — `false` apaga las tareas programadas (el control de antigüedad) |
+| `management.endpoints.web.exposure.include` | `health,info,metrics,prometheus` |
 | `springdoc.api-docs.path` / `swagger-ui.path` | `/api-docs` / `/swagger-ui.html` |
 
-El perfil `card-currency` (`application-card-currency.yml`, activado por docker-compose) cambia el nombre de la aplicación a `card-currency-service`, agrega `connection-timeout: 30000`, la configuración de errores de `server.error.*` y el logging a `logs/card-currency.log` (`com.unisono.card.currency` en `DEBUG`). A diferencia de otros perfiles, **no expone Prometheus** (el pom no trae `micrometer-registry-prometheus`).
+El perfil `card-currency` (`application-card-currency.yml`, activado por docker-compose) cambia el nombre de la aplicación a `card-currency-service`, agrega `connection-timeout: 30000`, la configuración de errores de `server.error.*` y el logging a `logs/card-currency.log` (`com.unisono.card.currency` en `DEBUG`).
 
 `CurrencyDatabaseConfig` solo declara los paquetes de repositorios y entidades JPA; el `DataSource` lo arma Spring Boot.
 
@@ -505,7 +509,14 @@ La carpeta *5. card-currency* de la [colección de Postman](../postman/Card%20Ma
 
 ### 7.3 Observabilidad
 
-- `GET /actuator/health` (con detalles, incluye la base), `/actuator/info`, `/actuator/metrics`.
+- `GET /actuator/health` (con detalles, incluye la base), `/actuator/info`, `/actuator/metrics`, `/actuator/prometheus`.
+- **Cotizaciones desactualizadas.** Una cotización vigente no vence (§3.2), así que `ExchangeRateFreshnessMonitor` controla su antigüedad cada 5 min (`ExchangeRateFreshnessService`, solo pares con las dos monedas activas) y alerta, sin bloquear conversiones:
+  - `card_currency_exchange_rates_stale`: pares cuya vigente rige hace más de `card.currency.rates.max-age` (24 h por defecto).
+  - `card_currency_exchange_rate_age_seconds{pair="USD/ARS"}`: antigüedad de la vigente de cada par. `card_currency_exchange_rates_max_age_seconds`: el umbral.
+  - `card_currency_exchange_rates_freshness_check_failures_total`: corridas que no pudieron consultar la base (los gauges quedan con el último valor).
+  - En el log, un `WARN` cuando un par pasa a estar desactualizado (`Exchange rate USD/ARS is stale…`) y un `INFO` cuando se publica una nueva; no se repite en cada corrida.
+  - **Reglas de alerta** de ejemplo en `deploy/prometheus/card-currency-alerts.yml`, validadas con `promtool`: `ExchangeRateStale` (10 min con algún par desactualizado) y `ExchangeRateFreshnessCheckFailing`. El docker-compose no incluye Prometheus.
+  - Con 24 h, una cotización publicada el viernes se alerta el sábado: si no se publica los fines de semana, subir `max-age` (por ejemplo `PT72H`).
 - Al arrancar, `WARN` por cada moneda con límites de crédito que no está disponible (o `INFO` si están todas); al dar de alta o desactivar monedas, al publicar cotizaciones (par, tasa, vigencia y `rateId` reemplazado) y al cancelarlas (par, `rateId` y la anterior que se extendió); `DEBUG` en las conversiones inversas; `WARN` en cada 4xx y en los conflictos de concurrencia.
 
 ### 7.4 Tests
@@ -521,6 +532,7 @@ mvn -pl services/card-currency -am test
 | `CurrencyApiTest` | Endpoints (incluido el `DELETE`), Bean Validation y mapeo de errores (MockMvc) |
 | `CurrencyPersistenceTest` | Mapeo JPA contra el DDL de V19, vigencias, índice único de cotización abierta, cancelación con reapertura de la anterior, `existsForPair` y el advisory lock en `pg_locks` (namespace y clave, igual para los dos sentidos) (Testcontainers: **requiere Docker**) |
 | `CreditLimitCurrencyAdapterTest` | Monedas de `credit_limits` (sin los eliminados) y que el bloqueo de una baja hace esperar la lectura `FOR SHARE` de card-limits (Testcontainers: **requiere Docker**) |
+| `ExchangeRateFreshnessServiceTest`, `ExchangeRateFreshnessMonitorTest` | Antigüedad de las vigentes (umbral, por par, monedas inactivas, programadas) y las métricas tal como las exporta `/actuator/prometheus`, con los nombres que usan las reglas de alerta |
 | `PairLockKeyTest` | Clave del lock: igual para los dos sentidos, sin colisiones ni fuera de rango entre todos los pares de monedas ISO 4217 de la JVM |
 
 Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contrato REST y el mapeo de 404/422/5xx.
@@ -543,7 +555,7 @@ Del lado de `payment-processing`, `CurrencyConversionAdapterTest` cubre el contr
 
 ### 9.1 Funcionales
 
-1. **Las cotizaciones no vencen.** Una cotización abierta sigue vigente indefinidamente; no hay control de antigüedad ni alerta si no se actualiza. Solo hay carga manual (`RateSource.MANUAL`), sin proveedor externo ni job de actualización.
+1. **Solo carga manual de cotizaciones.** `RateSource.MANUAL` es el único origen: no hay proveedor externo ni job que las actualice. Si nadie publica, la antigüedad se alerta (§7.3), pero la conversión sigue usando la última.
 2. **Sin triangulación.** Solo par directo o inverso; `USD → EUR` exige cargar `USD/EUR` o `EUR/USD` aunque existan `USD/ARS` y `EUR/ARS`.
 3. **Solo monedas de 2 decimales.** `Money` redondea todo a 2, así que el alta rechaza JPY, CLP, BHD, KWD y similares (§3.1). Soportarlas requiere que `Money` respete los decimales de cada moneda, lo que toca `card-shared` y las columnas `numeric(15,2)` de todos los servicios.
 4. **`appliedRate` de las inversas es aproximada.** El monto se calcula dividiendo por la tasa original, pero `appliedRate` es `1 ÷ rate` redondeada a 8 decimales: `sourceAmount × appliedRate` puede diferir en centavos de `targetAmount` para montos grandes. Lo que queda en la transacción de `payment-processing` es esa tasa redondeada.
