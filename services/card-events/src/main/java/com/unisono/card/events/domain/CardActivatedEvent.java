@@ -1,7 +1,6 @@
 package com.unisono.card.events.domain;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.ToString;
@@ -20,7 +19,6 @@ public class CardActivatedEvent extends DomainEvent implements CardStatusChange 
     /** Estado anterior de la tarjeta (CardStatus); nulo en mensajes anteriores a este campo. */
     private final String previousStatus;
 
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private final LocalDateTime activatedAt;
 
     private final String reason;

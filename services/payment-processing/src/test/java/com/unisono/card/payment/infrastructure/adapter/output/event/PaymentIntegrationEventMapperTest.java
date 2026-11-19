@@ -52,7 +52,8 @@ class PaymentIntegrationEventMapperTest {
 
         PaymentInitiatedEvent initiated = roundTrip(events.get(0), PaymentInitiatedEvent.class);
         assertThat(initiated.getEventId()).isEqualTo(events.get(0).getEventId());
-        assertThat(initiated.getOccurredOn()).isEqualTo(events.get(0).getOccurredOn().withNano(0));
+        // Las fechas viajan con su fracción de segundo (sin truncar)
+        assertThat(initiated.getOccurredOn()).isEqualTo(events.get(0).getOccurredOn());
         assertThat(initiated.getTransactionId()).isEqualTo(purchase.getTransactionId().toString());
         assertThat(initiated.getCardId()).isEqualTo(CARD_ID.getValue());
         assertThat(initiated.getTransactionType()).isEqualTo("PURCHASE");

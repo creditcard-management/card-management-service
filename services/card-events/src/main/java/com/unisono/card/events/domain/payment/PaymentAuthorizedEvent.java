@@ -1,7 +1,6 @@
 package com.unisono.card.events.domain.payment;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.unisono.card.events.domain.DomainEvent;
 import java.time.LocalDateTime;
@@ -25,7 +24,6 @@ public class PaymentAuthorizedEvent extends DomainEvent {
     /** Score de fraude 0-100 */
     private final Integer riskScore;
 
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private final LocalDateTime authorizedAt;
 
     @JsonCreator
