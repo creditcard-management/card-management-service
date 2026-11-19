@@ -1,6 +1,5 @@
 package com.unisono.card.events.domain;
 
-import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Getter;
 
 import java.time.LocalDateTime;
@@ -14,7 +13,6 @@ public abstract class DomainEvent {
 
     private final String eventId;
 
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private final LocalDateTime occurredOn;
 
     private final String eventType;

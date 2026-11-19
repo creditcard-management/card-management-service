@@ -1,7 +1,6 @@
 package com.unisono.card.events.domain.payment;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.unisono.card.events.domain.DomainEvent;
 import java.math.BigDecimal;
@@ -38,7 +37,6 @@ public class RefundInitiatedEvent extends DomainEvent {
     /** Tasa de cambio aplicada, solo si hubo conversión */
     private final BigDecimal exchangeRate;
 
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private final LocalDateTime initiatedAt;
 
     @JsonCreator

@@ -1,7 +1,6 @@
 package com.unisono.card.events.domain.payment;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.unisono.card.events.domain.DomainEvent;
 import java.math.BigDecimal;
@@ -38,7 +37,6 @@ public class PaymentReversedEvent extends DomainEvent {
 
     private final String reversalReason;
 
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private final LocalDateTime reversedAt;
 
     @JsonCreator
